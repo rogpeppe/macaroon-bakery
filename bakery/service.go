@@ -44,6 +44,8 @@ type NewServiceParams struct {
 
 	// Key is the public key pair used by the service for
 	// third-party caveat encryption.
+	// It may be nil, in which case a new key pair
+	// will be generated.
 	Key *KeyPair
 
 	// Locator provides public keys for third-party services by location when
@@ -164,6 +166,45 @@ func (req *Request) AddClientMacaroon(m *macaroon.Macaroon) {
 	req.inStorage[m] = item
 }
 
+// Macaroons returns all the client macaroons that
+// have been added to the request.
+func (req *Request) Macaroons() []*macaroon.Macaroon {
+	req.mu.Lock()
+	defer req.mu.Unlock()
+	ms := make([]*macaroon.Macaroon, len(req.macaroons))
+	copy(ms, req.macaroons)
+	return ms
+}
+
+// Check checks that the macaroons presented by the client verify
+// correctly. If the verification fails in a way which might be
+// remediable (for example by the addition of additional dicharge
+// macaroons), it returns a VerificationError that describes the error.
+func (req *Request) Check() error {
+	req.mu.Lock()
+	defer req.mu.Unlock()
+	if len(req.macaroons) == 0 {
+		return &VerificationError{
+			Reason: fmt.Errorf("no possible macaroons found"),
+		}
+	}
+	var anError error
+	for _, m := range req.macaroons {
+		item := req.inStorage[m]
+		if item == nil {
+			continue
+		}
+		err := m.Verify(item.RootKey, req.checker.CheckFirstPartyCaveat, req.macaroons)
+		if err == nil {
+			return nil
+		}
+		anError = err
+	}
+	return &VerificationError{
+		Reason: anError,
+	}
+}
+
 // NewMacaroon mints a new macaroon with the given id and caveats.
 // If the id is empty, a random id will be used.
 // If rootKey is nil, a random root key will be used.
@@ -258,35 +299,6 @@ func randomBytes(n int) ([]byte, error) {
 		return nil, fmt.Errorf("cannot generate %d random bytes: %v", n, err)
 	}
 	return b, nil
-}
-
-// Check checks that the macaroons presented by the client verify
-// correctly. If the verification fails in a way which might be
-// remediable (for example by the addition of additional dicharge
-// macaroons), it returns a VerificationError that describes the error.
-func (req *Request) Check() error {
-	req.mu.Lock()
-	defer req.mu.Unlock()
-	if len(req.macaroons) == 0 {
-		return &VerificationError{
-			Reason: fmt.Errorf("no possible macaroons found"),
-		}
-	}
-	var anError error
-	for _, m := range req.macaroons {
-		item := req.inStorage[m]
-		if item == nil {
-			continue
-		}
-		err := m.Verify(item.RootKey, req.checker.CheckFirstPartyCaveat, req.macaroons)
-		if err == nil {
-			return nil
-		}
-		anError = err
-	}
-	return &VerificationError{
-		Reason: anError,
-	}
 }
 
 type CaveatNotRecognizedError struct {
