@@ -80,65 +80,22 @@ type ServiceParams struct {
 	//
 	// The identity parameter passed to UserChecker.Allow will
 	// always have been obtained from a call to
-	// IdentityService.DeclaredIdentity.
+	// IdentityClient.DeclaredIdentity.
 	UserChecker UserChecker
 
-	// IdentityService is used for interactions with the external
+	// IdentityClient is used for interactions with the external
 	// identity service used for authentication.
-	IdentityClient IdentityService
+	IdentityClient IdentityClient
 
 	// MacaroonStore is used to retrieve macaroon root keys
 	// and other associated information.
 	MacaroonStore MacaroonStore
 }
 
-// Op holds an entity and action to be authorized on that entity.
-type Op struct {
-	// Action holds the action to perform on the entity, such as "read"
-	// or "delete". It is up to the service using a checker to define
-	// a set of operations and keep them consistent over time.
-	Action string
-
-	// Entity holds the name of the entity to be authorized.
-	// Entity names should not contain spaces and should
-	// not start with the prefix "login" or "multi-" (conventionally,
-	// entity names will be prefixed with the entity type followed
-	// by a hyphen.
-	Entity string
-}
-
-// MacaroonStore defines persistent storage for macaroon root keys.
-type MacaroonStore interface {
-	// MacaroonIdInfo returns information on the id of a macaroon.
-	// TODO define some error type so we can distinguish storage errors
-	// from bad ids and macaroon-not-found errors.
-	// TODO this method isn't in a position to verify the macaroon
-	// because it only has the id, which means that the information
-	// in the id isn't verified before being acted on (for example to
-	// get associated operatons from a persistent store).
-	// Perhaps this method would be better as:
-	// 	MacaroonInfo(ctxt context.Context, m *macaroon.Macaroon) ([]Op, []string, error)
-	// where the method both verifies the macaroon and returns its caveat conditions
-	// and the associared operations.
-	MacaroonIdInfo(ctxt context.Context, id []byte) (rootKey []byte, ops []Op, err error)
-}
-
-// IdentityService represents the interactions of the authenticator with a
-// trusted third party identity service.
-type IdentityService interface {
-	// IdentityCaveat encodes identity caveats addressed to the identity
-	// service that request the service to authenticate the user.
-	IdentityCaveats() []checkers.Caveat
-
-	// DeclaredIdentity parses the identity declaration from the given
-	// declared attributes.
-	DeclaredIdentity(declared map[string]string) (Identity, error)
-}
-
 // AuthInfo information about an authorization decision.
 type AuthInfo struct {
 	// Identity holds information on the authenticated user as returned
-	// from IdentityService.DeclaredUser. It may be nil after a
+	// from IdentityClient.DeclaredUser. It may be nil after a
 	// successful authorization if LoginOp access was not required.
 	Identity Identity
 
@@ -161,7 +118,7 @@ type AuthInfo struct {
 // service that's used as the root of trust, and persistent storage for
 // macaroon root keys.
 type Service struct {
-	p             ServiceParams
+	p ServiceParams
 }
 
 func NewService(p ServiceParams) *Service {
@@ -175,21 +132,6 @@ func NewService(p ServiceParams) *Service {
 
 func (s *Service) Namespace() *checkers.Namespace {
 	return s.p.CaveatChecker.Namespace()
-}
-
-// UserChecker is used to check whether a given user is allowed
-// to perform a set of operations.
-type UserChecker interface {
-	// Allow checks whether the given identity (which will be nil
-	// when there is no authenticated user) is allowed to perform
-	// the given operations. It should return an error only when
-	// some underlying database operation has failed, not when the
-	// user has been denied access.
-	//
-	// On success, each element of allowed holds whether the respective
-	// element of ops has been allowed, and caveats holds any additional
-	// third party caveats that apply.
-	Allow(ctxt context.Context, id Identity, ops []Op) (allowed []bool, caveats []checkers.Caveat, err error)
 }
 
 // NewAuthorizer makes a new Authorizer instance using the
@@ -236,19 +178,10 @@ func (a *Authorizer) initOnceFunc(ctxt context.Context) error {
 	a.authIndexes = make(map[Op][]int)
 	a.conditions = make([][]string, len(a.macaroons))
 	for i, ms := range a.macaroons {
-		if len(ms) == 0 {
-			continue
-		}
-		rootKey, ops, err := a.service.p.MacaroonStore.MacaroonIdInfo(ctxt, ms[0].Id())
+		ops, conditions, err := a.service.p.MacaroonStore.MacaroonInfo(ctxt, ms)
 		if err != nil {
-			logger.Infof("cannot get macaroon id info for %q\n", ms[0].Id())
+			logger.Infof("cannot get macaroon info for %q\n", ms[0].Id())
 			// TODO log error - if it's a storage error, return early here.
-			continue
-		}
-		conditions, err := verifyIgnoringCaveats(ms, rootKey)
-		if err != nil {
-			logger.Infof("cannot verify %q: %v\n", ms[0].Id())
-			// TODO log verification error
 			continue
 		}
 		// It's a valid macaroon (in principle - we haven't checked first party caveats).

@@ -63,16 +63,24 @@ func (s *macaroonStore) NewMacaroon(ops []auth.Op, caveats []checkers.Caveat, ns
 	return m, nil
 }
 
-func (s *macaroonStore) MacaroonIdInfo(ctxt context.Context, id []byte) (rootKey []byte, ops []auth.Op, err error) {
+func (s *macaroonStore) MacaroonInfo(ctxt context.Context, ms macaroon.Slice) (ops []auth.Op, conditions []string, err error) {
+	if len(ms) == 0 {
+		return nil, nil, errgo.Newf("no macaroons in slice")
+	}
+	id := ms[0].Id()
 	var mid macaroonId
 	if err := json.Unmarshal(id, &mid); err != nil {
 		return nil, nil, errgo.Notef(err, "bad macaroon id")
 	}
-	rootKey, err = s.store.Get(mid.Id)
+	rootKey, err := s.store.Get(mid.Id)
 	if err != nil {
 		return nil, nil, errgo.Notef(err, "cannot find root key")
 	}
-	return rootKey, mid.Ops, nil
+	conditions, err = ms[0].VerifiedConditions(rootKey, ms[1:])
+	if err != nil {
+		return nil, nil, errgo.Mask(err)
+	}
+	return mid.Ops, conditions, nil
 }
 
 func withoutLoginOp(ops []auth.Op) []auth.Op {
