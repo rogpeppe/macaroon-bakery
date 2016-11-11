@@ -162,7 +162,6 @@ type AuthInfo struct {
 // macaroon root keys.
 type Service struct {
 	p             ServiceParams
-	caveatChecker bakery.FirstPartyCaveatChecker
 }
 
 func NewService(p ServiceParams) *Service {
@@ -172,6 +171,10 @@ func NewService(p ServiceParams) *Service {
 	return &Service{
 		p: p,
 	}
+}
+
+func (s *Service) Namespace() *checkers.Namespace {
+	return s.p.CaveatChecker.Namespace()
 }
 
 // UserChecker is used to check whether a given user is allowed
@@ -551,11 +554,12 @@ func (c *caveatSquasher) add0(cond string) bool {
 
 func (a *Authorizer) checkConditions(ctxt context.Context, op Op, conds []string) (map[string]string, error) {
 	logger.Infof("checking conditions %q", conds)
-	declared := checkers.InferDeclaredFromConditions(conds)
+	checker := a.service.p.CaveatChecker
+	declared := checkers.InferDeclaredFromConditions(checker.Namespace(), conds)
 	ctxt = checkers.ContextWithOperations(ctxt, op.Action)
 	ctxt = checkers.ContextWithDeclared(ctxt, declared)
 	for _, cond := range conds {
-		if err := a.service.p.CheckFirstPartyCaveat(ctxt, cond); err != nil {
+		if err := checker.CheckFirstPartyCaveat(ctxt, cond); err != nil {
 			return nil, errgo.Mask(err)
 		}
 	}

@@ -40,7 +40,7 @@ type macaroonId struct {
 	Ops []auth.Op
 }
 
-func (s *macaroonStore) NewMacaroon(ops []auth.Op, caveats []checkers.Caveat) (*macaroon.Macaroon, error) {
+func (s *macaroonStore) NewMacaroon(ops []auth.Op, caveats []checkers.Caveat, ns *checkers.Namespace) (*macaroon.Macaroon, error) {
 	rootKey, id, err := s.store.RootKey()
 	if err != nil {
 		return nil, errgo.Mask(err)
@@ -56,7 +56,7 @@ func (s *macaroonStore) NewMacaroon(ops []auth.Op, caveats []checkers.Caveat) (*
 		return nil, errgo.Mask(err)
 	}
 	for _, cav := range caveats {
-		if err := bakery.AddCaveat(s.key, s.locator, m, cav); err != nil {
+		if err := bakery.AddCaveat(s.key, s.locator, m, cav, ns); err != nil {
 			return nil, errgo.Notef(err, "cannot add caveat")
 		}
 	}

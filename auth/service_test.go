@@ -30,12 +30,6 @@ var logger = loggo.GetLogger("bakery.auth_test")
 
 const Everyone = "everyone"
 
-var allCheckers = checkers.New(
-	checkers.TimeBefore,
-	checkers.Declared,
-	checkers.OperationChecker,
-)
-
 // TODO move idmclient to latest bakery version so we can avoid
 // double dependencies above.
 
@@ -307,7 +301,6 @@ func newTestServers(h AuthHTTPHandler, acls ACLGetter) *testServers {
 		svc: newAuthHTTPService(h,
 			idmClientShim{idmSrv.IDMClient("auth-user")},
 			acls,
-			allCheckers,
 		),
 	}
 }
@@ -421,13 +414,10 @@ func successBody(method, path string) string {
 // newAuthHTTPService returns a new HTTP service that serves requests from the given handler.
 // The entities map holds an entry for each known entity holding a map from action to ACL.
 // The checker is used to check first party caveats and may be nil.
-func newAuthHTTPService(handler AuthHTTPHandler, idm auth.IdentityClient, acls ACLGetter, caveatChecker checkers.Checker) *httptest.Server {
-	if caveatChecker == nil {
-		caveatChecker = checkers.New()
-	}
+func newAuthHTTPService(handler AuthHTTPHandler, idm auth.IdentityClient, acls ACLGetter) *httptest.Server {
 	store := newMacaroonStore()
 	service := auth.NewService(auth.ServiceParams{
-		CaveatChecker:  caveatChecker,
+		CaveatChecker:  httpbakery.NewChecker(),
 		UserChecker:    &aclUserChecker{acls},
 		IdentityClient: idm,
 		MacaroonStore:  store,
@@ -485,7 +475,7 @@ func (s *httpAuthChecker) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			s.writeError(w, err, req)
 			return
 		}
-		m, err := s.store.NewMacaroon(withoutLoginOp(ops), nil)
+		m, err := s.store.NewMacaroon(withoutLoginOp(ops), nil, s.service.Namespace())
 		if err != nil {
 			panic("cannot make new macaroon: " + err.Error())
 		}
@@ -542,7 +532,7 @@ func (s *httpAuthChecker) writeError(w http.ResponseWriter, err error, req *http
 		expiry = 24 * time.Hour
 	}
 	caveats := append(err1.Caveats, checkers.TimeBeforeCaveat(time.Now().Add(expiry)))
-	m, err := s.store.NewMacaroon(err1.Ops, caveats)
+	m, err := s.store.NewMacaroon(err1.Ops, caveats, s.service.Namespace())
 	if err != nil {
 		panic("cannot make new macaroon: " + err.Error())
 	}
