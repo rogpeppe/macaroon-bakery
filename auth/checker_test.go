@@ -298,7 +298,7 @@ func newTestServers(h AuthHTTPHandler, acls ACLGetter) *testServers {
 	idmSrv := idmtest.NewServer()
 	return &testServers{
 		idmSrv: idmSrv,
-		svc: newAuthHTTPService(h,
+		svc: newAuthHTTPChecker(h,
 			idmClientShim{idmSrv.IDMClient("auth-user")},
 			acls,
 		),
@@ -411,18 +411,18 @@ func successBody(method, path string) string {
 	return fmt.Sprintf("ok %s %s", method, path)
 }
 
-// newAuthHTTPService returns a new HTTP service that serves requests from the given handler.
+// newAuthHTTPChecker returns a new HTTP service that serves requests from the given handler.
 // The entities map holds an entry for each known entity holding a map from action to ACL.
 // The checker is used to check first party caveats and may be nil.
-func newAuthHTTPService(handler AuthHTTPHandler, idm auth.IdentityClient, acls ACLGetter) *httptest.Server {
+func newAuthHTTPChecker(handler AuthHTTPHandler, idm auth.IdentityClient, acls ACLGetter) *httptest.Server {
 	store := newMacaroonStore()
-	service := auth.NewService(auth.ServiceParams{
-		CaveatChecker:  httpbakery.NewChecker(),
-		UserChecker:    &aclUserChecker{acls},
+	checker := auth.NewChecker(auth.CheckerParams{
+		Checker:  httpbakery.NewChecker(),
+		Authorizer:    &aclAuthorizer{acls},
 		IdentityClient: idm,
 		MacaroonStore:  store,
 	})
-	return httptest.NewServer(checkHTTPAuth(service, store, handler))
+	return httptest.NewServer(checkHTTPAuth(checker, store, handler))
 }
 
 type ACL []string
@@ -443,16 +443,16 @@ func (f ACLGetterFunc) GetACL(ctxt context.Context, op auth.Op) (ACL, []checkers
 	return f(ctxt, op)
 }
 
-func checkHTTPAuth(service *auth.Service, store *macaroonStore, h AuthHTTPHandler) http.Handler {
+func checkHTTPAuth(checker *auth.Checker, store *macaroonStore, h AuthHTTPHandler) http.Handler {
 	return &httpAuthChecker{
-		service: service,
+		checker: checker,
 		h:       h,
 		store:   store,
 	}
 }
 
 type httpAuthChecker struct {
-	service *auth.Service
+	checker *auth.Checker
 	h       AuthHTTPHandler
 	store   *macaroonStore
 }
@@ -460,7 +460,7 @@ type httpAuthChecker struct {
 func (s *httpAuthChecker) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	mss := httpbakery.RequestMacaroons(req)
 	logger.Infof("%d macaroons in request", len(mss))
-	authorizer := s.service.NewAuthorizer(mss)
+	authChecker := s.checker.Auth(mss)
 
 	//	version := httpbakery.RequestVersion(req)
 	if req.Method == "AUTH" {
@@ -470,12 +470,12 @@ func (s *httpAuthChecker) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		req1.Method = req.Header.Get("AuthMethod")
 		ops := s.h.EndpointAuth(&req1)
 		logger.Infof("asking for capability for %#v", ops)
-		conditions, err := authorizer.AllowCapability(context.TODO(), ops)
+		conditions, err := authChecker.AllowCapability(context.TODO(), ops)
 		if err != nil {
 			s.writeError(w, err, req)
 			return
 		}
-		m, err := s.store.NewMacaroon(withoutLoginOp(ops), nil, s.service.Namespace())
+		m, err := s.store.NewMacaroon(withoutLoginOp(ops), nil, s.checker.Namespace())
 		if err != nil {
 			panic("cannot make new macaroon: " + err.Error())
 		}
@@ -497,7 +497,7 @@ func (s *httpAuthChecker) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 	ops := s.h.EndpointAuth(req)
 	logger.Infof("got ops %#v for path %v", ops, req.URL)
-	authInfo, err := authorizer.Allow(req.Context(), ops)
+	authInfo, err := authChecker.Allow(req.Context(), ops)
 	if err != nil {
 		logger.Infof("Allow returned %#v", err)
 		s.writeError(w, err, req)
@@ -514,6 +514,9 @@ func (s *httpAuthChecker) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 }
 
 func (s *httpAuthChecker) writeError(w http.ResponseWriter, err error, req *http.Request) {
+	if s == nil {
+		panic("nil s")
+	}
 	err1, ok := errgo.Cause(err).(*auth.DischargeRequiredError)
 	if !ok {
 		logger.Infof("error when authorizing: %#v", err)
@@ -532,7 +535,7 @@ func (s *httpAuthChecker) writeError(w http.ResponseWriter, err error, req *http
 		expiry = 24 * time.Hour
 	}
 	caveats := append(err1.Caveats, checkers.TimeBeforeCaveat(time.Now().Add(expiry)))
-	m, err := s.store.NewMacaroon(err1.Ops, caveats, s.service.Namespace())
+	m, err := s.store.NewMacaroon(err1.Ops, caveats, s.checker.Namespace())
 	if err != nil {
 		panic("cannot make new macaroon: " + err.Error())
 	}
@@ -548,13 +551,13 @@ type ACLGetter interface {
 	GetACL(context.Context, auth.Op) (ACL, []checkers.Caveat, error)
 }
 
-type aclUserChecker struct {
+type aclAuthorizer struct {
 	aclGetter ACLGetter
 }
 
-func (a *aclUserChecker) Allow(ctxt context.Context, id auth.Identity, ops []auth.Op) (allowed []bool, caveats []checkers.Caveat, err error) {
+func (a *aclAuthorizer) Authorize(ctxt context.Context, id auth.Identity, ops []auth.Op) (allowed []bool, caveats []checkers.Caveat, err error) {
 	defer func() {
-		logger.Infof("aclUserChecker.Allow(id %#v, ops %#v -> %v, %v, %v", id, ops, allowed, caveats, err)
+		logger.Infof("aclAuthorizer.Authorize(id %#v, ops %#v -> %v, %v, %v", id, ops, allowed, caveats, err)
 	}()
 	u, ok := id.(idmclient.ACLUser)
 	if id != nil && !ok {

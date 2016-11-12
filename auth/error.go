@@ -41,15 +41,6 @@ func isDischargeRequiredError(err error) bool {
 	return ok
 }
 
-type verificationError struct {
-	error
-}
-
-func isVerificationError(err error) bool {
-	_, ok := err.(*verificationError)
-	return ok
-}
-
 var (
 	ErrNotFound            = errgo.New("not found")
 	ErrCaveatResultUnknown = errgo.New("caveat result not known")

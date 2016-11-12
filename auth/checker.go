@@ -1,12 +1,83 @@
-// Package auth defines a structured way of authorizing access to a
-// service.
+package auth
+
+import (
+	"sort"
+	"sync"
+	"time"
+
+	"github.com/juju/loggo"
+	"golang.org/x/net/context"
+	errgo "gopkg.in/errgo.v1"
+	macaroon "gopkg.in/macaroon.v2-unstable"
+
+	"gopkg.in/macaroon-bakery.v2-unstable/bakery"
+	"gopkg.in/macaroon-bakery.v2-unstable/bakery/checkers"
+)
+
+var logger = loggo.GetLogger("bakery.auth")
+
+// TODO think about a consistent approach to error reporting for macaroons.
+
+// TODO should we really pass in explicit expiry times on each call to Allow?
+
+var LoginOp = Op{
+	Entity: "login",
+	Action: "login",
+}
+
+var ErrPermissionDenied = errgo.New("permission denied")
+
+type CheckerParams struct {
+	// CaveatChecker is used to check first party caveats when authorizing.
+	// If this is nil NewChecker will use checkers.New(nil).
+	Checker bakery.FirstPartyCaveatChecker
+
+	// Authorizer is used to check whether an authenticated user is
+	// allowed to perform operations.
+	//
+	// The identity parameter passed to Authorizer.Allow will
+	// always have been obtained from a call to
+	// IdentityClient.DeclaredIdentity.
+	Authorizer Authorizer
+
+	// IdentityClient is used for interactions with the external
+	// identity service used for authentication.
+	IdentityClient IdentityClient
+
+	// MacaroonStore is used to retrieve macaroon root keys
+	// and other associated information.
+	MacaroonStore MacaroonStore
+}
+
+// AuthInfo information about an authorization decision.
+type AuthInfo struct {
+	// Identity holds information on the authenticated user as returned
+	// from IdentityClient.DeclaredUser. It may be nil after a
+	// successful authorization if LoginOp access was not required.
+	Identity Identity
+
+	// Macaroons holds all the macaroons that were used for the
+	// authorization. Macaroons that were invalid or unnecessary are
+	// not included.
+	Macaroons []macaroon.Slice
+
+	// TODO add information on user ids that have contributed
+	// to the authorization:
+	// After a successful call to Authorize or Capability,
+	// AuthorizingUserIds returns the user ids that were used to
+	// create the capability macaroons used to authorize the call.
+	// Note that this is distinct from UserId, as there can only be
+	// one authenticated user associated with the checker.
+	// AuthorizingUserIds []string
+}
+
+// Checker wraps a FirstPartyCaveatChecker and adds authentication and authorization checks.
 //
 // It relies on a third party (the identity service) to authenticate
 // users and define group membership.
 //
 // It uses macaroons as authorization tokens but it is not itself responsible for
-// creating the macaroons - how and when to do that is considered
-// a higher level thing.
+// creating the macaroons - see the Oven type for one way of doing that.
 //
 // Identity and entities
 //
@@ -42,123 +113,40 @@
 // Third party caveats
 //
 // TODO.
-package auth
-
-import (
-	"sort"
-	"sync"
-	"time"
-
-	"github.com/juju/loggo"
-	"golang.org/x/net/context"
-	errgo "gopkg.in/errgo.v1"
-	macaroon "gopkg.in/macaroon.v2-unstable"
-
-	"gopkg.in/macaroon-bakery.v2-unstable/bakery"
-	"gopkg.in/macaroon-bakery.v2-unstable/bakery/checkers"
-)
-
-var logger = loggo.GetLogger("bakery.auth")
-
-// TODO think about a consistent approach to error reporting for macaroons.
-
-// TODO should we really pass in explicit expiry times on each call to Allow?
-
-var LoginOp = Op{
-	Entity: "login",
-	Action: "login",
+type Checker struct {
+	bakery.FirstPartyCaveatChecker
+	p CheckerParams
 }
 
-var ErrPermissionDenied = errgo.New("permission denied")
-
-type ServiceParams struct {
-	// CaveatChecker is used to check first party caveats when authorizing.
-	CaveatChecker bakery.FirstPartyCaveatChecker
-
-	// UserChecker is used to check whether an authenticated user is
-	// allowed to perform operations.
-	//
-	// The identity parameter passed to UserChecker.Allow will
-	// always have been obtained from a call to
-	// IdentityClient.DeclaredIdentity.
-	UserChecker UserChecker
-
-	// IdentityClient is used for interactions with the external
-	// identity service used for authentication.
-	IdentityClient IdentityClient
-
-	// MacaroonStore is used to retrieve macaroon root keys
-	// and other associated information.
-	MacaroonStore MacaroonStore
-}
-
-// AuthInfo information about an authorization decision.
-type AuthInfo struct {
-	// Identity holds information on the authenticated user as returned
-	// from IdentityClient.DeclaredUser. It may be nil after a
-	// successful authorization if LoginOp access was not required.
-	Identity Identity
-
-	// Macaroons holds all the macaroons that were used for the
-	// authorization. Macaroons that were invalid or unnecessary are
-	// not included.
-	Macaroons []macaroon.Slice
-
-	// TODO add information on user ids that have contributed
-	// to the authorization:
-	// After a successful call to Authorize or Capability,
-	// AuthorizingUserIds returns the user ids that were used to
-	// create the capability macaroons used to authorize the call.
-	// Note that this is distinct from UserId, as there can only be
-	// one authenticated user associated with the checker.
-	// AuthorizingUserIds []string
-}
-
-// Service represents an authorization service. It defines the identity
-// service that's used as the root of trust, and persistent storage for
-// macaroon root keys.
-type Service struct {
-	p ServiceParams
-}
-
-func NewService(p ServiceParams) *Service {
-	if p.CaveatChecker == nil {
-		p.CaveatChecker = checkers.New(nil)
+// NewChecker returns a new Checker using the given parameters.
+// If p.CaveatChecker is nil, it will be initialized to checkers.New(nil).
+func NewChecker(p CheckerParams) *Checker {
+	if p.Checker == nil {
+		p.Checker = checkers.New(nil)
 	}
-	return &Service{
+	return &Checker{
+		FirstPartyCaveatChecker: p.Checker,
 		p: p,
 	}
 }
 
-func (s *Service) Namespace() *checkers.Namespace {
-	return s.p.CaveatChecker.Namespace()
-}
-
-// NewAuthorizer makes a new Authorizer instance using the
+// Auth makes a new AuthChecker instance using the
 // given macaroons to inform authorization decisions.
-func (s *Service) NewAuthorizer(mss []macaroon.Slice) *Authorizer {
-	return &Authorizer{
+func (c *Checker) Auth(mss []macaroon.Slice) *AuthChecker {
+	return &AuthChecker{
+		Checker: c,
 		macaroons: mss,
-		service:   s,
 	}
 }
 
-type macaroonInfo struct {
-	// index holds the index into the Request.Macaroons slice
-	// of the macaroon that authorized the operation.
-	index int
-
-	// conditions holds the first party caveat conditions from the macaroons.
-	conditions []string
-}
-
-// Authorizer authorizes operations with respect to a user's request.
-type Authorizer struct {
+// AuthChecker wraps a Checker with methods that authorize with respect to a particular
+//  authorizes operations with respect to a user's request.
+type AuthChecker struct {
+	*Checker
 	macaroons []macaroon.Slice
 	// conditions holds the first party caveat conditions
 	// that apply to each of the above macaroons.
 	conditions [][]string
-	service    *Service
 	initOnce   sync.Once
 	initError  error
 	identity   Identity
@@ -167,18 +155,18 @@ type Authorizer struct {
 	authIndexes map[Op][]int
 }
 
-func (a *Authorizer) init(ctxt context.Context) error {
+func (a *AuthChecker) init(ctxt context.Context) error {
 	a.initOnce.Do(func() {
 		a.initError = a.initOnceFunc(ctxt)
 	})
 	return a.initError
 }
 
-func (a *Authorizer) initOnceFunc(ctxt context.Context) error {
+func (a *AuthChecker) initOnceFunc(ctxt context.Context) error {
 	a.authIndexes = make(map[Op][]int)
 	a.conditions = make([][]string, len(a.macaroons))
 	for i, ms := range a.macaroons {
-		ops, conditions, err := a.service.p.MacaroonStore.MacaroonInfo(ctxt, ms)
+		ops, conditions, err := a.p.MacaroonStore.MacaroonInfo(ctxt, ms)
 		if err != nil {
 			logger.Infof("cannot get macaroon info for %q\n", ms[0].Id())
 			// TODO log error - if it's a storage error, return early here.
@@ -198,7 +186,7 @@ func (a *Authorizer) initOnceFunc(ctxt context.Context) error {
 				// TODO log duplicate authn-macaroon error
 				continue
 			}
-			identity, err := a.service.p.IdentityClient.DeclaredIdentity(declared)
+			identity, err := a.p.IdentityClient.DeclaredIdentity(declared)
 			if err != nil {
 				logger.Infof("cannot decode declared identity: %v", err)
 				// TODO log user-decode error
@@ -233,17 +221,12 @@ func (a *Authorizer) initOnceFunc(ctxt context.Context) error {
 // be *DischargeRequiredError holding the operations that remain to
 // be authorized in order to allow authorization to
 // proceed.
-func (a *Authorizer) Allow(ctxt context.Context, ops []Op) (*AuthInfo, error) {
+func (a *AuthChecker) Allow(ctxt context.Context, ops []Op) (*AuthInfo, error) {
 	authInfo, _, err := a.AllowAny(ctxt, ops)
 	if err != nil {
 		return nil, err
 	}
 	return authInfo, nil
-}
-
-type authInfo struct {
-	identity Identity
-	authed   []bool
 }
 
 // AllowAny is like Allow except that it will authorize as many of the
@@ -260,12 +243,12 @@ type authInfo struct {
 //
 // The LoginOp operation is treated specially - it is always required if
 // present in ops.
-func (a *Authorizer) AllowAny(ctxt context.Context, ops []Op) (*AuthInfo, []bool, error) {
+func (a *AuthChecker) AllowAny(ctxt context.Context, ops []Op) (*AuthInfo, []bool, error) {
 	authed, used, err := a.allowAny(ctxt, ops)
 	return a.newAuthInfo(used), authed, err
 }
 
-func (a *Authorizer) newAuthInfo(used []bool) *AuthInfo {
+func (a *AuthChecker) newAuthInfo(used []bool) *AuthInfo {
 	info := &AuthInfo{
 		Identity:  a.identity,
 		Macaroons: make([]macaroon.Slice, 0, len(a.macaroons)),
@@ -282,7 +265,7 @@ func (a *Authorizer) newAuthInfo(used []bool) *AuthInfo {
 // authInfo struct, it returns a slice describing which operations have
 // been successfully authorized and a slice describing which macaroons
 // have been used in the authorization.
-func (a *Authorizer) allowAny(ctxt context.Context, ops []Op) (authed, used []bool, err error) {
+func (a *AuthChecker) allowAny(ctxt context.Context, ops []Op) (authed, used []bool, err error) {
 	if err := a.init(ctxt); err != nil {
 		return nil, nil, errgo.Mask(err)
 	}
@@ -339,7 +322,7 @@ func (a *Authorizer) allowAny(ctxt context.Context, ops []Op) (authed, used []bo
 	}
 	logger.Infof("operations needed after authz macaroons: %#v", need)
 	// Try to authorize the operations even even if we haven't got an authenticated user.
-	oks, caveats, err := a.service.p.UserChecker.Allow(ctxt, a.identity, need)
+	oks, caveats, err := a.p.Authorizer.Authorize(ctxt, a.identity, need)
 	if err != nil {
 		return authed, used, errgo.Notef(err, "cannot check permissions")
 	}
@@ -365,7 +348,7 @@ func (a *Authorizer) allowAny(ctxt context.Context, ops []Op) (authed, used []bo
 		return authed, used, &DischargeRequiredError{
 			Message: "authentication required",
 			Ops:     []Op{LoginOp},
-			Caveats: a.service.p.IdentityClient.IdentityCaveats(),
+			Caveats: a.p.IdentityClient.IdentityCaveats(),
 		}
 	}
 	if len(caveats) == 0 {
@@ -387,7 +370,7 @@ func (a *Authorizer) allowAny(ctxt context.Context, ops []Op) (authed, used []bo
 //
 // If ops contains LoginOp, the user must have been authenticated with a
 // macaroon associated with the single operation LoginOp only.
-func (a *Authorizer) AllowCapability(ctxt context.Context, ops []Op) ([]string, error) {
+func (a *AuthChecker) AllowCapability(ctxt context.Context, ops []Op) ([]string, error) {
 	nops := 0
 	for _, op := range ops {
 		if op != LoginOp {
@@ -423,41 +406,13 @@ func (a *Authorizer) AllowCapability(ctxt context.Context, ops []Op) ([]string, 
 //	- removing duplicates.
 type caveatSquasher struct {
 	expiry time.Time
-	prev   string
 	conds  []string
 }
 
 func (c *caveatSquasher) add(cond string) {
-	// Don't add if already added.
-	for _, added := range c.conds {
-		if added == cond {
-			return
-		}
-	}
 	if c.add0(cond) {
 		c.conds = append(c.conds, cond)
 	}
-}
-
-func (c *caveatSquasher) final() []string {
-	if !c.expiry.IsZero() {
-		c.conds = append(c.conds, checkers.TimeBeforeCaveat(c.expiry).Condition)
-	}
-	if len(c.conds) == 0 {
-		return nil
-	}
-	// Make deterministic and eliminate duplicates.
-	sort.Strings(c.conds)
-	prev := c.conds[0]
-	j := 1
-	for _, cond := range c.conds[1:] {
-		if cond != prev {
-			c.conds[j] = cond
-			prev = cond
-			j++
-		}
-	}
-	return c.conds
 }
 
 func (c *caveatSquasher) add0(cond string) bool {
@@ -485,33 +440,36 @@ func (c *caveatSquasher) add0(cond string) bool {
 	return true
 }
 
-func (a *Authorizer) checkConditions(ctxt context.Context, op Op, conds []string) (map[string]string, error) {
+func (c *caveatSquasher) final() []string {
+	if !c.expiry.IsZero() {
+		c.conds = append(c.conds, checkers.TimeBeforeCaveat(c.expiry).Condition)
+	}
+	if len(c.conds) == 0 {
+		return nil
+	}
+	// Make deterministic and eliminate duplicates.
+	sort.Strings(c.conds)
+	prev := c.conds[0]
+	j := 1
+	for _, cond := range c.conds[1:] {
+		if cond != prev {
+			c.conds[j] = cond
+			prev = cond
+			j++
+		}
+	}
+	return c.conds
+}
+
+func (a *AuthChecker) checkConditions(ctxt context.Context, op Op, conds []string) (map[string]string, error) {
 	logger.Infof("checking conditions %q", conds)
-	checker := a.service.p.CaveatChecker
-	declared := checkers.InferDeclaredFromConditions(checker.Namespace(), conds)
+	declared := checkers.InferDeclaredFromConditions(a.Namespace(), conds)
 	ctxt = checkers.ContextWithOperations(ctxt, op.Action)
 	ctxt = checkers.ContextWithDeclared(ctxt, declared)
 	for _, cond := range conds {
-		if err := checker.CheckFirstPartyCaveat(ctxt, cond); err != nil {
+		if err := a.CheckFirstPartyCaveat(ctxt, cond); err != nil {
 			return nil, errgo.Mask(err)
 		}
 	}
 	return declared, nil
-}
-
-// verifyIgnoringCaveats verifies the given macaroon and its discharges without
-// checking any caveats. It returns all the caveats that should
-// have been checked.
-func verifyIgnoringCaveats(ms macaroon.Slice, rootKey []byte) ([]string, error) {
-	var caveats []string
-	if len(ms) == 0 {
-		return nil, errgo.New("no macaroons in slice")
-	}
-	if err := ms[0].Verify(rootKey, func(caveat string) error {
-		caveats = append(caveats, caveat)
-		return nil
-	}, ms[1:]); err != nil {
-		return nil, errgo.Mask(err)
-	}
-	return caveats, nil
 }

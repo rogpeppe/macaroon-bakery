@@ -28,7 +28,7 @@ type Op struct {
 // identity.
 type IdentityClient interface {
 	// IdentityCaveats encodes identity caveats addressed to the identity
-	// service that request the service to authenticate the user.
+	// service that request it to authenticate the user.
 	IdentityCaveats() []checkers.Caveat
 
 	// DeclaredIdentity parses the identity declaration from the given
@@ -63,9 +63,9 @@ type MacaroonStore interface {
 	MacaroonInfo(ctxt context.Context, ms macaroon.Slice) ([]Op, []string, error)
 }
 
-// UserChecker is used to check whether a given user is allowed
+// Authorizer is used to check whether a given user is allowed
 // to perform a set of operations.
-type UserChecker interface {
+type Authorizer interface {
 	// Allow checks whether the given identity (which will be nil
 	// when there is no authenticated user) is allowed to perform
 	// the given operations. It should return an error only when
@@ -75,5 +75,5 @@ type UserChecker interface {
 	// On success, each element of allowed holds whether the respective
 	// element of ops has been allowed, and caveats holds any additional
 	// third party caveats that apply.
-	Allow(ctxt context.Context, id Identity, ops []Op) (allowed []bool, caveats []checkers.Caveat, err error)
+	Authorize(ctxt context.Context, id Identity, ops []Op) (allowed []bool, caveats []checkers.Caveat, err error)
 }
