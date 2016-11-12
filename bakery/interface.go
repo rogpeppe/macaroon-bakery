@@ -52,16 +52,17 @@ type Identity interface {
 	Domain() string
 }
 
-// MacaroonStore defines persistent storage for macaroon root keys.
-type MacaroonStore interface {
-	// MacaroonInfo verifies the signature of the given macaroon and returns
+// MacaroonOpStore provides a mapping from a set of macaroons to their
+// associated operations and caveats.
+type MacaroonOpStore interface {
+	// MacaroonOps verifies the signature of the given macaroon and returns
 	// information on its associated operations, and all the first party
 	// caveat conditions that need to be checked.
 	//
 	// This method should not check first party caveats itself.
 	// TODO define some error type so we can distinguish storage errors
 	// from bad ids and macaroon-not-found errors.
-	MacaroonInfo(ctxt context.Context, ms macaroon.Slice) ([]Op, []string, error)
+	MacaroonOps(ctxt context.Context, ms macaroon.Slice) ([]Op, []string, error)
 }
 
 // Authorizer is used to check whether a given user is allowed

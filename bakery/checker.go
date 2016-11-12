@@ -40,9 +40,9 @@ type CheckerParams struct {
 	// identity service used for authentication.
 	IdentityClient IdentityClient
 
-	// MacaroonStore is used to retrieve macaroon root keys
+	// MacaroonOps is used to retrieve macaroon root keys
 	// and other associated information.
-	MacaroonStore MacaroonStore
+	MacaroonOpStore MacaroonOpStore
 }
 
 // AuthInfo information about an authorization decision.
@@ -162,7 +162,7 @@ func (a *AuthChecker) initOnceFunc(ctxt context.Context) error {
 	a.authIndexes = make(map[Op][]int)
 	a.conditions = make([][]string, len(a.macaroons))
 	for i, ms := range a.macaroons {
-		ops, conditions, err := a.p.MacaroonStore.MacaroonInfo(ctxt, ms)
+		ops, conditions, err := a.p.MacaroonOpStore.MacaroonOps(ctxt, ms)
 		if err != nil {
 			logger.Infof("cannot get macaroon info for %q\n", ms[0].Id())
 			// TODO log error - if it's a storage error, return early here.

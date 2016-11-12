@@ -416,10 +416,10 @@ func successBody(method, path string) string {
 func newAuthHTTPChecker(handler AuthHTTPHandler, idm bakery.IdentityClient, acls ACLGetter) *httptest.Server {
 	store := newMacaroonStore()
 	checker := bakery.NewChecker(bakery.CheckerParams{
-		Checker:        httpbakery.NewChecker(),
-		Authorizer:     &aclAuthorizer{acls},
-		IdentityClient: idm,
-		MacaroonStore:  store,
+		Checker:         httpbakery.NewChecker(),
+		Authorizer:      &aclAuthorizer{acls},
+		IdentityClient:  idm,
+		MacaroonOpStore: store,
 	})
 	return httptest.NewServer(checkHTTPAuth(checker, store, handler))
 }

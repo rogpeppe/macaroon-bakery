@@ -62,7 +62,7 @@ func (s *macaroonStore) NewMacaroon(ops []bakery.Op, caveats []checkers.Caveat, 
 	return m, nil
 }
 
-func (s *macaroonStore) MacaroonInfo(ctxt context.Context, ms macaroon.Slice) (ops []bakery.Op, conditions []string, err error) {
+func (s *macaroonStore) MacaroonOps(ctxt context.Context, ms macaroon.Slice) (ops []bakery.Op, conditions []string, err error) {
 	if len(ms) == 0 {
 		return nil, nil, errgo.Newf("no macaroons in slice")
 	}
