@@ -1,9 +1,10 @@
-package auth
+package bakery
 
 import (
 	"golang.org/x/net/context"
-	"gopkg.in/macaroon-bakery.v2-unstable/bakery/checkers"
 	"gopkg.in/macaroon.v2-unstable"
+
+	"gopkg.in/macaroon-bakery.v2-unstable/bakery/checkers"
 )
 
 // Op holds an entity and action to be authorized on that entity.

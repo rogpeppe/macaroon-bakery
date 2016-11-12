@@ -1,4 +1,4 @@
-package auth_test
+package bakery_test
 
 import (
 	"encoding/json"
@@ -7,7 +7,6 @@ import (
 	errgo "gopkg.in/errgo.v1"
 	"gopkg.in/macaroon.v2-unstable"
 
-	"gopkg.in/macaroon-bakery.v2-unstable/auth"
 	"gopkg.in/macaroon-bakery.v2-unstable/bakery"
 	"gopkg.in/macaroon-bakery.v2-unstable/bakery/checkers"
 	"gopkg.in/macaroon-bakery.v2-unstable/httpbakery"
@@ -37,10 +36,10 @@ func newMacaroonStore() *macaroonStore {
 
 type macaroonId struct {
 	Id  []byte
-	Ops []auth.Op
+	Ops []bakery.Op
 }
 
-func (s *macaroonStore) NewMacaroon(ops []auth.Op, caveats []checkers.Caveat, ns *checkers.Namespace) (*macaroon.Macaroon, error) {
+func (s *macaroonStore) NewMacaroon(ops []bakery.Op, caveats []checkers.Caveat, ns *checkers.Namespace) (*macaroon.Macaroon, error) {
 	rootKey, id, err := s.store.RootKey()
 	if err != nil {
 		return nil, errgo.Mask(err)
@@ -63,7 +62,7 @@ func (s *macaroonStore) NewMacaroon(ops []auth.Op, caveats []checkers.Caveat, ns
 	return m, nil
 }
 
-func (s *macaroonStore) MacaroonInfo(ctxt context.Context, ms macaroon.Slice) (ops []auth.Op, conditions []string, err error) {
+func (s *macaroonStore) MacaroonInfo(ctxt context.Context, ms macaroon.Slice) (ops []bakery.Op, conditions []string, err error) {
 	if len(ms) == 0 {
 		return nil, nil, errgo.Newf("no macaroons in slice")
 	}
@@ -83,11 +82,11 @@ func (s *macaroonStore) MacaroonInfo(ctxt context.Context, ms macaroon.Slice) (o
 	return mid.Ops, conditions, nil
 }
 
-func withoutLoginOp(ops []auth.Op) []auth.Op {
+func withoutLoginOp(ops []bakery.Op) []bakery.Op {
 	// Remove LoginOp from the operations associated with the new macaroon.
 	hasLoginOp := false
 	for _, op := range ops {
-		if op == auth.LoginOp {
+		if op == bakery.LoginOp {
 			hasLoginOp = true
 			break
 		}
@@ -95,9 +94,9 @@ func withoutLoginOp(ops []auth.Op) []auth.Op {
 	if !hasLoginOp {
 		return ops
 	}
-	newOps := make([]auth.Op, 0, len(ops))
+	newOps := make([]bakery.Op, 0, len(ops))
 	for _, op := range ops {
-		if op != auth.LoginOp {
+		if op != bakery.LoginOp {
 			newOps = append(newOps, op)
 		}
 	}

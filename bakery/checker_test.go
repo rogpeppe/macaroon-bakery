@@ -1,4 +1,4 @@
-package auth_test
+package bakery_test
 
 import (
 	"encoding/base64"
@@ -19,7 +19,6 @@ import (
 	errgo "gopkg.in/errgo.v1"
 	"gopkg.in/macaroon.v2-unstable"
 
-	"gopkg.in/macaroon-bakery.v2-unstable/auth"
 	"gopkg.in/macaroon-bakery.v2-unstable/bakery"
 	"gopkg.in/macaroon-bakery.v2-unstable/bakery/checkers"
 	"gopkg.in/macaroon-bakery.v2-unstable/bakerytest"
@@ -46,7 +45,7 @@ type AuthHTTPHandler interface {
 	// EndpointAuth returns the operations and caveats required by the
 	// endpoint implied by the given request.
 	// TODO return caveats too.
-	EndpointAuth(req *http.Request) []auth.Op
+	EndpointAuth(req *http.Request) []bakery.Op
 }
 
 func (*authSuite) TestAuthorizeWithoutHTTPBakery(c *gc.C) {
@@ -232,7 +231,7 @@ func (*authSuite) TestAuthWithThirdPartyCaveats(c *gc.C) {
 		},
 	))
 	defer thirdParty.Close()
-	getACL := func(context.Context, auth.Op) (ACL, []checkers.Caveat, error) {
+	getACL := func(context.Context, bakery.Op) (ACL, []checkers.Caveat, error) {
 		return ACL{"bob"}, []checkers.Caveat{{
 			Condition: "important caveat",
 			Location:  thirdParty.Location(),
@@ -314,7 +313,7 @@ type idmClientShim struct {
 	idmclient.IdentityClient
 }
 
-func (c idmClientShim) DeclaredIdentity(attrs map[string]string) (auth.Identity, error) {
+func (c idmClientShim) DeclaredIdentity(attrs map[string]string) (bakery.Identity, error) {
 	return c.IdentityClient.DeclaredIdentity(attrs)
 }
 
@@ -380,14 +379,14 @@ type testHandler struct {
 //
 // To test multiple-entity operations, all values of the "e" query
 // parameter are also added as GET operations.
-func (h testHandler) EndpointAuth(req *http.Request) []auth.Op {
+func (h testHandler) EndpointAuth(req *http.Request) []bakery.Op {
 	req.ParseForm()
-	ops := []auth.Op{{
+	ops := []bakery.Op{{
 		Entity: "path-" + req.URL.Path,
 		Action: req.Method,
 	}}
 	for _, entity := range req.Form["e"] {
-		ops = append(ops, auth.Op{
+		ops = append(ops, bakery.Op{
 			Entity: "path-" + entity,
 			Action: "GET",
 		})
@@ -414,11 +413,11 @@ func successBody(method, path string) string {
 // newAuthHTTPChecker returns a new HTTP service that serves requests from the given handler.
 // The entities map holds an entry for each known entity holding a map from action to ACL.
 // The checker is used to check first party caveats and may be nil.
-func newAuthHTTPChecker(handler AuthHTTPHandler, idm auth.IdentityClient, acls ACLGetter) *httptest.Server {
+func newAuthHTTPChecker(handler AuthHTTPHandler, idm bakery.IdentityClient, acls ACLGetter) *httptest.Server {
 	store := newMacaroonStore()
-	checker := auth.NewChecker(auth.CheckerParams{
-		Checker:  httpbakery.NewChecker(),
-		Authorizer:    &aclAuthorizer{acls},
+	checker := bakery.NewChecker(bakery.CheckerParams{
+		Checker:        httpbakery.NewChecker(),
+		Authorizer:     &aclAuthorizer{acls},
 		IdentityClient: idm,
 		MacaroonStore:  store,
 	})
@@ -431,19 +430,19 @@ type ACLMap map[string]map[string]ACL
 
 // GetACL implements ACLGetter.GetACL by returning the ACL from
 // the map.
-func (e ACLMap) GetACL(_ context.Context, op auth.Op) (ACL, []checkers.Caveat, error) {
+func (e ACLMap) GetACL(_ context.Context, op bakery.Op) (ACL, []checkers.Caveat, error) {
 	acl := e[op.Entity][op.Action]
 	logger.Infof("getting ACLs for %#v -> %#v", op, acl)
 	return acl, nil, nil
 }
 
-type ACLGetterFunc func(context.Context, auth.Op) (ACL, []checkers.Caveat, error)
+type ACLGetterFunc func(context.Context, bakery.Op) (ACL, []checkers.Caveat, error)
 
-func (f ACLGetterFunc) GetACL(ctxt context.Context, op auth.Op) (ACL, []checkers.Caveat, error) {
+func (f ACLGetterFunc) GetACL(ctxt context.Context, op bakery.Op) (ACL, []checkers.Caveat, error) {
 	return f(ctxt, op)
 }
 
-func checkHTTPAuth(checker *auth.Checker, store *macaroonStore, h AuthHTTPHandler) http.Handler {
+func checkHTTPAuth(checker *bakery.Checker, store *macaroonStore, h AuthHTTPHandler) http.Handler {
 	return &httpAuthChecker{
 		checker: checker,
 		h:       h,
@@ -452,7 +451,7 @@ func checkHTTPAuth(checker *auth.Checker, store *macaroonStore, h AuthHTTPHandle
 }
 
 type httpAuthChecker struct {
-	checker *auth.Checker
+	checker *bakery.Checker
 	h       AuthHTTPHandler
 	store   *macaroonStore
 }
@@ -517,7 +516,7 @@ func (s *httpAuthChecker) writeError(w http.ResponseWriter, err error, req *http
 	if s == nil {
 		panic("nil s")
 	}
-	err1, ok := errgo.Cause(err).(*auth.DischargeRequiredError)
+	err1, ok := errgo.Cause(err).(*bakery.DischargeRequiredError)
 	if !ok {
 		logger.Infof("error when authorizing: %#v", err)
 		// TODO permission denied error.
@@ -530,7 +529,7 @@ func (s *httpAuthChecker) writeError(w http.ResponseWriter, err error, req *http
 	}
 	cookieName := "authz"
 	expiry := 5 * time.Second
-	if len(err1.Ops) == 1 && err1.Ops[0] == auth.LoginOp {
+	if len(err1.Ops) == 1 && err1.Ops[0] == bakery.LoginOp {
 		cookieName = "authn"
 		expiry = 24 * time.Hour
 	}
@@ -548,14 +547,14 @@ func (s *httpAuthChecker) writeError(w http.ResponseWriter, err error, req *http
 }
 
 type ACLGetter interface {
-	GetACL(context.Context, auth.Op) (ACL, []checkers.Caveat, error)
+	GetACL(context.Context, bakery.Op) (ACL, []checkers.Caveat, error)
 }
 
 type aclAuthorizer struct {
 	aclGetter ACLGetter
 }
 
-func (a *aclAuthorizer) Authorize(ctxt context.Context, id auth.Identity, ops []auth.Op) (allowed []bool, caveats []checkers.Caveat, err error) {
+func (a *aclAuthorizer) Authorize(ctxt context.Context, id bakery.Identity, ops []bakery.Op) (allowed []bool, caveats []checkers.Caveat, err error) {
 	defer func() {
 		logger.Infof("aclAuthorizer.Authorize(id %#v, ops %#v -> %v, %v, %v", id, ops, allowed, caveats, err)
 	}()

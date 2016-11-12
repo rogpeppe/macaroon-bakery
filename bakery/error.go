@@ -1,4 +1,4 @@
-package auth
+package bakery
 
 import (
 	errgo "gopkg.in/errgo.v1"
@@ -42,6 +42,8 @@ func isDischargeRequiredError(err error) bool {
 }
 
 var (
+	// ErrNotFound is returned by Storage.Get implementations
+	// to signal that an id has not been found.
 	ErrNotFound            = errgo.New("not found")
 	ErrCaveatResultUnknown = errgo.New("caveat result not known")
 )

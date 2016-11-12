@@ -1,20 +1,16 @@
-package auth
+package bakery
 
 import (
 	"sort"
 	"sync"
 	"time"
 
-	"github.com/juju/loggo"
 	"golang.org/x/net/context"
 	errgo "gopkg.in/errgo.v1"
 	macaroon "gopkg.in/macaroon.v2-unstable"
 
-	"gopkg.in/macaroon-bakery.v2-unstable/bakery"
 	"gopkg.in/macaroon-bakery.v2-unstable/bakery/checkers"
 )
-
-var logger = loggo.GetLogger("bakery.auth")
 
 // TODO think about a consistent approach to error reporting for macaroons.
 
@@ -30,7 +26,7 @@ var ErrPermissionDenied = errgo.New("permission denied")
 type CheckerParams struct {
 	// CaveatChecker is used to check first party caveats when authorizing.
 	// If this is nil NewChecker will use checkers.New(nil).
-	Checker bakery.FirstPartyCaveatChecker
+	Checker FirstPartyCaveatChecker
 
 	// Authorizer is used to check whether an authenticated user is
 	// allowed to perform operations.
@@ -114,7 +110,7 @@ type AuthInfo struct {
 //
 // TODO.
 type Checker struct {
-	bakery.FirstPartyCaveatChecker
+	FirstPartyCaveatChecker
 	p CheckerParams
 }
 
@@ -134,7 +130,7 @@ func NewChecker(p CheckerParams) *Checker {
 // given macaroons to inform authorization decisions.
 func (c *Checker) Auth(mss []macaroon.Slice) *AuthChecker {
 	return &AuthChecker{
-		Checker: c,
+		Checker:   c,
 		macaroons: mss,
 	}
 }

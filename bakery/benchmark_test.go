@@ -1,4 +1,4 @@
-package auth_test
+package bakery_test
 
 import (
 	"io/ioutil"
