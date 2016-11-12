@@ -64,7 +64,7 @@ type CheckerParams struct {
 // AuthInfo information about an authorization decision.
 type AuthInfo struct {
 	// Identity holds information on the authenticated user as returned
-	// from IdentityClient.DeclaredUser. It may be nil after a
+	// from IdentityClient. It may be nil after a
 	// successful authorization if LoginOp access was not required.
 	Identity Identity
 
@@ -161,10 +161,11 @@ type AuthChecker struct {
 	macaroons []macaroon.Slice
 	// conditions holds the first party caveat conditions
 	// that apply to each of the above macaroons.
-	conditions [][]string
-	initOnce   sync.Once
-	initError  error
-	identity   Identity
+	conditions      [][]string
+	initOnce        sync.Once
+	initError       error
+	identity        Identity
+	identityCaveats []checkers.Caveat
 	// authIndexes holds for each potentially authorized operation
 	// the indexes of the macaroons that authorize it.
 	authIndexes map[Op][]int
@@ -213,6 +214,17 @@ func (a *AuthChecker) initOnceFunc(ctxt context.Context) error {
 		for _, op := range ops {
 			a.authIndexes[op] = append(a.authIndexes[op], i)
 		}
+	}
+	if a.identity == nil {
+		// No identity yet, so try to get one based on the context.
+		identity, caveats, err := a.p.IdentityClient.IdentityFromContext(ctxt)
+		if err != nil {
+			return errgo.Notef(err, "could not determine identity")
+		}
+		if identity == nil && caveats == nil {
+			return errgo.Newf("identity client returned no identity and no caveats")
+		}
+		a.identity, a.identityCaveats = identity, caveats
 	}
 	logger.Infof("after init, identity: %#v, authIndexes %v", a.identity, a.authIndexes)
 	return nil
@@ -336,6 +348,7 @@ func (a *AuthChecker) allowAny(ctxt context.Context, ops []Op) (authed, used []b
 		}
 	}
 	logger.Infof("operations needed after authz macaroons: %#v", need)
+
 	// Try to authorize the operations even even if we haven't got an authenticated user.
 	oks, caveats, err := a.p.Authorizer.Authorize(ctxt, a.identity, need)
 	if err != nil {
@@ -359,11 +372,10 @@ func (a *AuthChecker) allowAny(ctxt context.Context, ops []Op) (authed, used []b
 	}
 	logger.Infof("operations still needed after auth check: %#v", stillNeed)
 	if a.identity == nil {
-		// User hasn't authenticated - ask them to do so.
 		return authed, used, &DischargeRequiredError{
 			Message: "authentication required",
 			Ops:     []Op{LoginOp},
-			Caveats: a.p.IdentityClient.IdentityCaveats(),
+			Caveats: a.identityCaveats,
 		}
 	}
 	if len(caveats) == 0 {

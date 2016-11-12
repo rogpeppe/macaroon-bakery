@@ -317,6 +317,10 @@ func (c idmClientShim) DeclaredIdentity(attrs map[string]string) (bakery.Identit
 	return c.IdentityClient.DeclaredIdentity(attrs)
 }
 
+func (c idmClientShim) IdentityFromContext(ctxt context.Context) (bakery.Identity, []checkers.Caveat, error) {
+	return nil, c.IdentityClient.IdentityCaveats(), nil
+}
+
 type httpDoer interface {
 	Do(*http.Request) (*http.Response, error)
 }
