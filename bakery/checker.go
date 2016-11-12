@@ -29,7 +29,8 @@ type CheckerParams struct {
 	Checker FirstPartyCaveatChecker
 
 	// Authorizer is used to check whether an authenticated user is
-	// allowed to perform operations.
+	// allowed to perform operations. If it is nil, NewChecker will
+	// use ClosedAuthorizer.
 	//
 	// The identity parameter passed to Authorizer.Allow will
 	// always have been obtained from a call to
@@ -119,6 +120,9 @@ type Checker struct {
 func NewChecker(p CheckerParams) *Checker {
 	if p.Checker == nil {
 		p.Checker = checkers.New(nil)
+	}
+	if p.Authorizer == nil {
+		p.Authorizer = ClosedAuthorizer
 	}
 	return &Checker{
 		FirstPartyCaveatChecker: p.Checker,
