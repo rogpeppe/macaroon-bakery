@@ -60,7 +60,7 @@ type MacaroonOpStore interface {
 	// caveat conditions that need to be checked.
 	//
 	// This method should not check first party caveats itself.
-	// TODO define some error type so we can distinguish storage errors
+	// TODO define some error type so we can distinguish store errors
 	// from bad ids and macaroon-not-found errors.
 	MacaroonOps(ctxt context.Context, ms macaroon.Slice) ([]Op, []string, error)
 }

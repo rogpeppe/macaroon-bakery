@@ -13,7 +13,7 @@ import (
 )
 
 type macaroonStore struct {
-	store bakery.Storage
+	store bakery.RootKeyStore
 
 	key *bakery.KeyPair
 
@@ -28,7 +28,7 @@ func newMacaroonStore() *macaroonStore {
 	locator := httpbakery.NewThirdPartyLocator(nil, nil)
 	locator.AllowInsecure()
 	return &macaroonStore{
-		store:   bakery.NewMemStorage(),
+		store:   bakery.NewMemRootKeyStore(),
 		key:     key,
 		locator: locator,
 	}

@@ -42,7 +42,7 @@ func isDischargeRequiredError(err error) bool {
 }
 
 var (
-	// ErrNotFound is returned by Storage.Get implementations
+	// ErrNotFound is returned by Store.Get implementations
 	// to signal that an id has not been found.
 	ErrNotFound            = errgo.New("not found")
 	ErrCaveatResultUnknown = errgo.New("caveat result not known")

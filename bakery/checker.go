@@ -165,7 +165,7 @@ func (a *AuthChecker) initOnceFunc(ctxt context.Context) error {
 		ops, conditions, err := a.p.MacaroonOpStore.MacaroonOps(ctxt, ms)
 		if err != nil {
 			logger.Infof("cannot get macaroon info for %q\n", ms[0].Id())
-			// TODO log error - if it's a storage error, return early here.
+			// TODO log error - if it's a store error, return early here.
 			continue
 		}
 		// It's a valid macaroon (in principle - we haven't checked first party caveats).

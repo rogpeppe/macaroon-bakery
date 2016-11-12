@@ -1,4 +1,4 @@
-package mgostorage_test
+package mgorootkeystore_test
 
 import (
 	"fmt"
@@ -10,31 +10,31 @@ import (
 	"gopkg.in/mgo.v2"
 
 	"gopkg.in/macaroon-bakery.v2-unstable/bakery"
-	"gopkg.in/macaroon-bakery.v2-unstable/bakery/mgostorage"
+	"gopkg.in/macaroon-bakery.v2-unstable/bakery/mgorootkeystore"
 )
 
-type RootKeyStorageSuite struct {
+type RootKeyStoreSuite struct {
 	testing.IsolatedMgoSuite
 }
 
-var _ = gc.Suite(&RootKeyStorageSuite{})
+var _ = gc.Suite(&RootKeyStoreSuite{})
 
 var epoch = time.Date(2000, time.January, 1, 0, 0, 0, 0, time.UTC)
 
 var isValidWithPolicyTests = []struct {
 	about  string
-	policy mgostorage.Policy
+	policy mgorootkeystore.Policy
 	now    time.Time
-	key    mgostorage.RootKey
+	key    mgorootkeystore.RootKey
 	expect bool
 }{{
 	about: "success",
-	policy: mgostorage.Policy{
+	policy: mgorootkeystore.Policy{
 		GenerateInterval: 2 * time.Minute,
 		ExpiryDuration:   3 * time.Minute,
 	},
 	now: epoch.Add(20 * time.Minute),
-	key: mgostorage.RootKey{
+	key: mgorootkeystore.RootKey{
 		Created: epoch.Add(19 * time.Minute),
 		Expires: epoch.Add(24 * time.Minute),
 		Id:      []byte("id"),
@@ -43,21 +43,21 @@ var isValidWithPolicyTests = []struct {
 	expect: true,
 }, {
 	about: "empty root key",
-	policy: mgostorage.Policy{
+	policy: mgorootkeystore.Policy{
 		GenerateInterval: 2 * time.Minute,
 		ExpiryDuration:   3 * time.Minute,
 	},
 	now:    epoch.Add(20 * time.Minute),
-	key:    mgostorage.RootKey{},
+	key:    mgorootkeystore.RootKey{},
 	expect: false,
 }, {
 	about: "created too early",
-	policy: mgostorage.Policy{
+	policy: mgorootkeystore.Policy{
 		GenerateInterval: 2 * time.Minute,
 		ExpiryDuration:   3 * time.Minute,
 	},
 	now: epoch.Add(20 * time.Minute),
-	key: mgostorage.RootKey{
+	key: mgorootkeystore.RootKey{
 		Created: epoch.Add(18*time.Minute - time.Millisecond),
 		Expires: epoch.Add(24 * time.Minute),
 		Id:      []byte("id"),
@@ -66,12 +66,12 @@ var isValidWithPolicyTests = []struct {
 	expect: false,
 }, {
 	about: "expires too early",
-	policy: mgostorage.Policy{
+	policy: mgorootkeystore.Policy{
 		GenerateInterval: 2 * time.Minute,
 		ExpiryDuration:   3 * time.Minute,
 	},
 	now: epoch.Add(20 * time.Minute),
-	key: mgostorage.RootKey{
+	key: mgorootkeystore.RootKey{
 		Created: epoch.Add(19 * time.Minute),
 		Expires: epoch.Add(21 * time.Minute),
 		Id:      []byte("id"),
@@ -80,12 +80,12 @@ var isValidWithPolicyTests = []struct {
 	expect: false,
 }, {
 	about: "expires too late",
-	policy: mgostorage.Policy{
+	policy: mgorootkeystore.Policy{
 		GenerateInterval: 2 * time.Minute,
 		ExpiryDuration:   3 * time.Minute,
 	},
 	now: epoch.Add(20 * time.Minute),
-	key: mgostorage.RootKey{
+	key: mgorootkeystore.RootKey{
 		Created: epoch.Add(19 * time.Minute),
 		Expires: epoch.Add(25*time.Minute + time.Millisecond),
 		Id:      []byte("id"),
@@ -94,23 +94,23 @@ var isValidWithPolicyTests = []struct {
 	expect: false,
 }}
 
-func (s *RootKeyStorageSuite) TestIsValidWithPolicy(c *gc.C) {
+func (s *RootKeyStoreSuite) TestIsValidWithPolicy(c *gc.C) {
 	var now time.Time
-	s.PatchValue(mgostorage.TimeNow, func() time.Time {
+	s.PatchValue(mgorootkeystore.TimeNow, func() time.Time {
 		return now
 	})
 	for i, test := range isValidWithPolicyTests {
 		c.Logf("test %d: %v", i, test.about)
 		now = test.now
-		c.Assert(mgostorage.IsValidWithPolicy(test.key, test.policy), gc.Equals, test.expect)
+		c.Assert(mgorootkeystore.IsValidWithPolicy(test.key, test.policy), gc.Equals, test.expect)
 	}
 }
 
-func (s *RootKeyStorageSuite) TestRootKeyUsesKeysValidWithPolicy(c *gc.C) {
+func (s *RootKeyStoreSuite) TestRootKeyUsesKeysValidWithPolicy(c *gc.C) {
 	// We re-use the TestIsValidWithPolicy tests so that we
 	// know that the mongo logic uses the same behaviour.
 	var now time.Time
-	s.PatchValue(mgostorage.TimeNow, func() time.Time {
+	s.PatchValue(mgorootkeystore.TimeNow, func() time.Time {
 		return now
 	})
 	for i, test := range isValidWithPolicyTests {
@@ -126,7 +126,7 @@ func (s *RootKeyStorageSuite) TestRootKeyUsesKeysValidWithPolicy(c *gc.C) {
 		err = s.coll().Insert(test.key)
 		c.Assert(err, gc.IsNil)
 
-		store := mgostorage.NewRootKeys(10).NewStorage(s.coll(), test.policy)
+		store := mgorootkeystore.NewRootKeys(10).NewStore(s.coll(), test.policy)
 		now = test.now
 		key, id, err := store.RootKey()
 		c.Assert(err, gc.IsNil)
@@ -142,13 +142,13 @@ func (s *RootKeyStorageSuite) TestRootKeyUsesKeysValidWithPolicy(c *gc.C) {
 	}
 }
 
-func (s *RootKeyStorageSuite) TestRootKey(c *gc.C) {
+func (s *RootKeyStoreSuite) TestRootKey(c *gc.C) {
 	now := epoch
-	s.PatchValue(mgostorage.TimeNow, func() time.Time {
+	s.PatchValue(mgorootkeystore.TimeNow, func() time.Time {
 		return now
 	})
 
-	store := mgostorage.NewRootKeys(10).NewStorage(s.coll(), mgostorage.Policy{
+	store := mgorootkeystore.NewRootKeys(10).NewStore(s.coll(), mgorootkeystore.Policy{
 		GenerateInterval: 2 * time.Minute,
 		ExpiryDuration:   5 * time.Minute,
 	})
@@ -165,8 +165,8 @@ func (s *RootKeyStorageSuite) TestRootKey(c *gc.C) {
 	c.Assert(key1, gc.DeepEquals, key)
 	c.Assert(id1, gc.DeepEquals, id)
 
-	// A different storage instance should get the same root key.
-	store1 := mgostorage.NewRootKeys(10).NewStorage(s.coll(), mgostorage.Policy{
+	// A different store instance should get the same root key.
+	store1 := mgorootkeystore.NewRootKeys(10).NewStore(s.coll(), mgorootkeystore.Policy{
 		GenerateInterval: 2 * time.Minute,
 		ExpiryDuration:   5 * time.Minute,
 	})
@@ -191,12 +191,12 @@ func (s *RootKeyStorageSuite) TestRootKey(c *gc.C) {
 	c.Assert(id2, gc.DeepEquals, id1)
 }
 
-func (s *RootKeyStorageSuite) TestRootKeyDefaultGenerateInterval(c *gc.C) {
+func (s *RootKeyStoreSuite) TestRootKeyDefaultGenerateInterval(c *gc.C) {
 	now := epoch
-	s.PatchValue(mgostorage.TimeNow, func() time.Time {
+	s.PatchValue(mgorootkeystore.TimeNow, func() time.Time {
 		return now
 	})
-	store := mgostorage.NewRootKeys(10).NewStorage(s.coll(), mgostorage.Policy{
+	store := mgorootkeystore.NewRootKeys(10).NewStore(s.coll(), mgorootkeystore.Policy{
 		ExpiryDuration: 5 * time.Minute,
 	})
 	key, id, err := store.RootKey()
@@ -218,13 +218,13 @@ func (s *RootKeyStorageSuite) TestRootKeyDefaultGenerateInterval(c *gc.C) {
 var preferredRootKeyTests = []struct {
 	about    string
 	now      time.Time
-	keys     []mgostorage.RootKey
-	policy   mgostorage.Policy
+	keys     []mgorootkeystore.RootKey
+	policy   mgorootkeystore.Policy
 	expectId []byte
 }{{
 	about: "latest creation time is preferred",
 	now:   epoch.Add(5 * time.Minute),
-	keys: []mgostorage.RootKey{{
+	keys: []mgorootkeystore.RootKey{{
 		Created: epoch.Add(4 * time.Minute),
 		Expires: epoch.Add(15 * time.Minute),
 		Id:      []byte("id0"),
@@ -240,7 +240,7 @@ var preferredRootKeyTests = []struct {
 		Id:      []byte("id2"),
 		RootKey: []byte("key2"),
 	}},
-	policy: mgostorage.Policy{
+	policy: mgorootkeystore.Policy{
 		GenerateInterval: 5 * time.Minute,
 		ExpiryDuration:   7 * time.Minute,
 	},
@@ -248,7 +248,7 @@ var preferredRootKeyTests = []struct {
 }, {
 	about: "ineligible keys are exluded",
 	now:   epoch.Add(5 * time.Minute),
-	keys: []mgostorage.RootKey{{
+	keys: []mgorootkeystore.RootKey{{
 		Created: epoch.Add(4 * time.Minute),
 		Expires: epoch.Add(15 * time.Minute),
 		Id:      []byte("id0"),
@@ -264,16 +264,16 @@ var preferredRootKeyTests = []struct {
 		Id:      []byte("id2"),
 		RootKey: []byte("key2"),
 	}},
-	policy: mgostorage.Policy{
+	policy: mgorootkeystore.Policy{
 		GenerateInterval: 5 * time.Minute,
 		ExpiryDuration:   7 * time.Minute,
 	},
 	expectId: []byte("id1"),
 }}
 
-func (s *RootKeyStorageSuite) TestPreferredRootKeyFromDatabase(c *gc.C) {
+func (s *RootKeyStoreSuite) TestPreferredRootKeyFromDatabase(c *gc.C) {
 	var now time.Time
-	s.PatchValue(mgostorage.TimeNow, func() time.Time {
+	s.PatchValue(mgorootkeystore.TimeNow, func() time.Time {
 		return now
 	})
 	for i, test := range preferredRootKeyTests {
@@ -284,7 +284,7 @@ func (s *RootKeyStorageSuite) TestPreferredRootKeyFromDatabase(c *gc.C) {
 			err := s.coll().Insert(key)
 			c.Assert(err, gc.IsNil)
 		}
-		store := mgostorage.NewRootKeys(10).NewStorage(s.coll(), test.policy)
+		store := mgorootkeystore.NewRootKeys(10).NewStore(s.coll(), test.policy)
 		now = test.now
 		_, id, err := store.RootKey()
 		c.Assert(err, gc.IsNil)
@@ -292,9 +292,9 @@ func (s *RootKeyStorageSuite) TestPreferredRootKeyFromDatabase(c *gc.C) {
 	}
 }
 
-func (s *RootKeyStorageSuite) TestPreferredRootKeyFromCache(c *gc.C) {
+func (s *RootKeyStoreSuite) TestPreferredRootKeyFromCache(c *gc.C) {
 	var now time.Time
-	s.PatchValue(mgostorage.TimeNow, func() time.Time {
+	s.PatchValue(mgorootkeystore.TimeNow, func() time.Time {
 		return now
 	})
 	for i, test := range preferredRootKeyTests {
@@ -303,7 +303,7 @@ func (s *RootKeyStorageSuite) TestPreferredRootKeyFromCache(c *gc.C) {
 			err := s.coll().Insert(key)
 			c.Assert(err, gc.IsNil)
 		}
-		store := mgostorage.NewRootKeys(10).NewStorage(s.coll(), test.policy)
+		store := mgorootkeystore.NewRootKeys(10).NewStore(s.coll(), test.policy)
 		// Ensure that all the keys are in cache by getting all of them.
 		for _, key := range test.keys {
 			got, err := store.Get(key.Id)
@@ -323,13 +323,13 @@ func (s *RootKeyStorageSuite) TestPreferredRootKeyFromCache(c *gc.C) {
 	}
 }
 
-func (s *RootKeyStorageSuite) TestGet(c *gc.C) {
+func (s *RootKeyStoreSuite) TestGet(c *gc.C) {
 	now := epoch
-	s.PatchValue(mgostorage.TimeNow, func() time.Time {
+	s.PatchValue(mgorootkeystore.TimeNow, func() time.Time {
 		return now
 	})
 
-	store := mgostorage.NewRootKeys(5).NewStorage(s.coll(), mgostorage.Policy{
+	store := mgorootkeystore.NewRootKeys(5).NewStore(s.coll(), mgorootkeystore.Policy{
 		GenerateInterval: 1 * time.Minute,
 		ExpiryDuration:   30 * time.Minute,
 	})
@@ -366,7 +366,7 @@ func (s *RootKeyStorageSuite) TestGet(c *gc.C) {
 	// should result in a database fetch.
 
 	var fetched []string
-	s.PatchValue(mgostorage.MgoCollectionFindId, func(coll *mgo.Collection, id interface{}) *mgo.Query {
+	s.PatchValue(mgorootkeystore.MgoCollectionFindId, func(coll *mgo.Collection, id interface{}) *mgo.Query {
 		fetched = append(fetched, string(id.([]byte)))
 		return coll.FindId(id)
 	})
@@ -385,13 +385,13 @@ func (s *RootKeyStorageSuite) TestGet(c *gc.C) {
 	}
 }
 
-func (s *RootKeyStorageSuite) TestGetCachesMisses(c *gc.C) {
-	store := mgostorage.NewRootKeys(5).NewStorage(s.coll(), mgostorage.Policy{
+func (s *RootKeyStoreSuite) TestGetCachesMisses(c *gc.C) {
+	store := mgorootkeystore.NewRootKeys(5).NewStore(s.coll(), mgorootkeystore.Policy{
 		GenerateInterval: 1 * time.Minute,
 		ExpiryDuration:   30 * time.Minute,
 	})
 	var fetched []string
-	s.PatchValue(mgostorage.MgoCollectionFindId, func(coll *mgo.Collection, id interface{}) *mgo.Query {
+	s.PatchValue(mgorootkeystore.MgoCollectionFindId, func(coll *mgo.Collection, id interface{}) *mgo.Query {
 		fetched = append(fetched, fmt.Sprintf("%#v", id))
 		return coll.FindId(id)
 	})
@@ -408,18 +408,18 @@ func (s *RootKeyStorageSuite) TestGetCachesMisses(c *gc.C) {
 	c.Assert(fetched, gc.IsNil)
 }
 
-func (s *RootKeyStorageSuite) TestGetExpiredItemFromCache(c *gc.C) {
+func (s *RootKeyStoreSuite) TestGetExpiredItemFromCache(c *gc.C) {
 	now := epoch
-	s.PatchValue(mgostorage.TimeNow, func() time.Time {
+	s.PatchValue(mgorootkeystore.TimeNow, func() time.Time {
 		return now
 	})
-	store := mgostorage.NewRootKeys(10).NewStorage(s.coll(), mgostorage.Policy{
+	store := mgorootkeystore.NewRootKeys(10).NewStore(s.coll(), mgorootkeystore.Policy{
 		ExpiryDuration: 5 * time.Minute,
 	})
 	_, id, err := store.RootKey()
 	c.Assert(err, gc.IsNil)
 
-	s.PatchValue(mgostorage.MgoCollectionFindId, func(*mgo.Collection, interface{}) *mgo.Query {
+	s.PatchValue(mgorootkeystore.MgoCollectionFindId, func(*mgo.Collection, interface{}) *mgo.Query {
 		c.Errorf("FindId unexpectedly called")
 		return nil
 	})
@@ -430,8 +430,8 @@ func (s *RootKeyStorageSuite) TestGetExpiredItemFromCache(c *gc.C) {
 	c.Assert(err, gc.Equals, bakery.ErrNotFound)
 }
 
-func (s *RootKeyStorageSuite) TestEnsureIndex(c *gc.C) {
-	keys := mgostorage.NewRootKeys(5)
+func (s *RootKeyStoreSuite) TestEnsureIndex(c *gc.C) {
+	keys := mgorootkeystore.NewRootKeys(5)
 	err := keys.EnsureIndex(s.coll())
 	c.Assert(err, gc.IsNil)
 
@@ -442,12 +442,12 @@ func (s *RootKeyStorageSuite) TestEnsureIndex(c *gc.C) {
 
 	c.SucceedNow()
 
-	_, id1, err := keys.NewStorage(s.coll(), mgostorage.Policy{
+	_, id1, err := keys.NewStore(s.coll(), mgorootkeystore.Policy{
 		ExpiryDuration: 100 * time.Millisecond,
 	}).RootKey()
 	c.Assert(err, gc.IsNil)
 
-	_, id2, err := keys.NewStorage(s.coll(), mgostorage.Policy{
+	_, id2, err := keys.NewStore(s.coll(), mgorootkeystore.Policy{
 		ExpiryDuration: time.Hour,
 	}).RootKey()
 	c.Assert(err, gc.IsNil)
@@ -479,7 +479,7 @@ type legacyRootKey struct {
 	RootKey []byte
 }
 
-func (s *RootKeyStorageSuite) TestLegacy(c *gc.C) {
+func (s *RootKeyStoreSuite) TestLegacy(c *gc.C) {
 	err := s.coll().Insert(&legacyRootKey{
 		Id:      "foo",
 		RootKey: []byte("a key"),
@@ -487,7 +487,7 @@ func (s *RootKeyStorageSuite) TestLegacy(c *gc.C) {
 		Expires: time.Now().Add(10 * time.Minute),
 	})
 	c.Assert(err, gc.IsNil)
-	store := mgostorage.NewRootKeys(10).NewStorage(s.coll(), mgostorage.Policy{
+	store := mgorootkeystore.NewRootKeys(10).NewStore(s.coll(), mgorootkeystore.Policy{
 		ExpiryDuration: 5 * time.Minute,
 	})
 	rk, err := store.Get([]byte("foo"))
@@ -495,6 +495,6 @@ func (s *RootKeyStorageSuite) TestLegacy(c *gc.C) {
 	c.Assert(string(rk), gc.Equals, "a key")
 }
 
-func (s *RootKeyStorageSuite) coll() *mgo.Collection {
+func (s *RootKeyStoreSuite) coll() *mgo.Collection {
 	return s.Session.DB("test").C("items")
 }

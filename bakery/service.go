@@ -1,5 +1,5 @@
 // The bakery package layers on top of the macaroon package, providing
-// a transport and storage-agnostic way of using macaroons to assert
+// a transport and store-agnostic way of using macaroons to assert
 // client capabilities.
 //
 package bakery
@@ -53,7 +53,7 @@ func MacaroonVersion(v Version) macaroon.Version {
 // to check authorization.
 type Service struct {
 	location string
-	store    Storage
+	store    RootKeyStore
 	key      *KeyPair
 	locator  ThirdPartyLocator
 	checker  FirstPartyCaveatChecker
@@ -67,8 +67,8 @@ type NewServiceParams struct {
 
 	// Store will be used to store macaroon
 	// information locally. If it is nil,
-	// an in-memory storage will be used.
-	Store Storage
+	// an in-memory store will be used.
+	Store RootKeyStore
 
 	// Key is the public key pair used by the service for
 	// third-party caveat encryption.
@@ -90,7 +90,7 @@ type NewServiceParams struct {
 // macaroons and store their associated root keys.
 func NewService(p NewServiceParams) (*Service, error) {
 	if p.Store == nil {
-		p.Store = NewMemStorage()
+		p.Store = NewMemRootKeyStore()
 	}
 	if p.Key == nil {
 		var err error
@@ -127,18 +127,18 @@ func (emptyLocator) ThirdPartyInfo(loc string) (ThirdPartyInfo, error) {
 //
 // When NewMacaroon is called on the returned Service,
 // it must always be called with an empty id and rootKey.
-func (svc *Service) WithStore(store Storage) *Service {
+func (svc *Service) WithStore(store RootKeyStore) *Service {
 	svc1 := *svc
 	svc1.store = store
 	return &svc1
 }
 
 // Store returns the store used by the service.
-// If the service has a RootKeyStorage (there
+// If the service has a RootKeyStore (there
 // was one specified in the parameters or the service
-// was created with WithRootKeyStorage), it
+// was created with WithRootKeyStore), it
 // returns nil.
-func (svc *Service) Store() Storage {
+func (svc *Service) RootKeyStore() RootKeyStore {
 	return svc.store
 }
 
@@ -202,7 +202,7 @@ func (svc *Service) Check(ctxt context.Context, ms macaroon.Slice) error {
 		}
 	}
 	// Trim any extraneous information from the id before retrieving
-	// it from storage, including the UUID that's added when
+	// it from store, including the UUID that's added when
 	// creating macaroons to make all macaroons unique even if
 	// they're using the same root key.
 	switch id[0] {
@@ -227,7 +227,7 @@ func (svc *Service) Check(ctxt context.Context, ms macaroon.Slice) error {
 		// because it's been removed after time-expiry,
 		// so return a verification error.
 		return &VerificationError{
-			Reason: errgo.Newf("macaroon not found in storage"),
+			Reason: errgo.Newf("macaroon not found in store"),
 		}
 	}
 	err = ms[0].Verify(rootKey, svc.caveatChecker(ctxt), ms[1:])
@@ -302,7 +302,7 @@ func isVerificationError(err error) bool {
 // NewMacaroon mints a new macaroon with the given caveats
 // and version.
 // The root key for the macaroon will be obtained from
-// the service's Storage.
+// the service's Store.
 func (svc *Service) NewMacaroon(version Version, caveats []checkers.Caveat) (*macaroon.Macaroon, error) {
 	rootKey, id, err := svc.rootKey()
 	if err != nil {

@@ -57,7 +57,7 @@ func (s *ServiceSuite) TestSingleServiceFirstParty(c *gc.C) {
 // TestMacaroonPaperFig6 implements an example flow as described in the macaroons paper:
 // http://theory.stanford.edu/~ataly/Papers/macaroons.pdf
 // There are three services, ts, fs, as:
-// ts is a storage service which has deligated authority to a forum service fs.
+// ts is a store service which has deligated authority to a forum service fs.
 // The forum service wants to require its users to be logged into to an authentication service as.
 //
 // The client obtains a macaroon from fs (minted by ts, with a third party caveat addressed to as).
@@ -125,12 +125,12 @@ func (s *ServiceSuite) TestVersion1MacaroonId(c *gc.C) {
 	// UUID suffix.
 	ts := newService(c, "ts-loc", nil)
 
-	key, id, err := ts.Store().RootKey()
+	key, id, err := ts.RootKeyStore().RootKey()
 	c.Assert(err, gc.IsNil)
 
-	_, err = ts.Store().Get(id)
+	_, err = ts.RootKeyStore().Get(id)
 	c.Assert(err, gc.IsNil)
-	c.Logf("successfully got %q from %#v", id, ts.Store())
+	c.Logf("successfully got %q from %#v", id, ts.RootKeyStore())
 
 	m, err := macaroon.New(key, []byte(fmt.Sprintf("%s-0000000", id)), "", macaroon.V1)
 	c.Assert(err, gc.IsNil)
@@ -384,7 +384,7 @@ func (s *ServiceSuite) TestDischargeMacaroonCannotBeUsedAsNormalMacaroon(c *gc.C
 
 	// Make sure it cannot be used as a normal macaroon in the third party.
 	err = thirdParty.Check(context.Background(), macaroon.Slice{d})
-	c.Assert(err, gc.ErrorMatches, `verification failed: macaroon not found in storage`)
+	c.Assert(err, gc.ErrorMatches, `verification failed: macaroon not found in store`)
 }
 
 func (*ServiceSuite) TestCheckAny(c *gc.C) {
@@ -485,14 +485,14 @@ func (*ServiceSuite) TestCheckAny(c *gc.C) {
 	}
 }
 
-func (s *ServiceSuite) TestNewMacaroonWithExplicitStorage(c *gc.C) {
+func (s *ServiceSuite) TestNewMacaroonWithExplicitStore(c *gc.C) {
 	svc, err := bakery.NewService(bakery.NewServiceParams{
 		Location: "somewhere",
 		Checker:  testChecker,
 	})
 	c.Assert(err, gc.IsNil)
 
-	store := bakery.NewMemStorage()
+	store := bakery.NewMemRootKeyStore()
 	key, id, err := store.RootKey()
 	c.Assert(err, gc.IsNil)
 
@@ -536,8 +536,8 @@ func (s *ServiceSuite) TestNewMacaroonWithExplicitStorage(c *gc.C) {
 	c.Assert(err, gc.IsNil)
 }
 
-func (s *ServiceSuite) TestNewMacaroonWithStorageInParams(c *gc.C) {
-	store := bakery.NewMemStorage()
+func (s *ServiceSuite) TestNewMacaroonWithStoreInParams(c *gc.C) {
+	store := bakery.NewMemRootKeyStore()
 	_, id, err := store.RootKey()
 	c.Assert(err, gc.IsNil)
 

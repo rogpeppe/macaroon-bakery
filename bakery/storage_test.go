@@ -7,12 +7,12 @@ import (
 	"gopkg.in/macaroon-bakery.v2-unstable/bakery"
 )
 
-type StorageSuite struct{}
+type StoreSuite struct{}
 
-var _ = gc.Suite(&StorageSuite{})
+var _ = gc.Suite(&StoreSuite{})
 
-func (*StorageSuite) TestMemStorage(c *gc.C) {
-	store := bakery.NewMemStorage()
+func (*StoreSuite) TestMemStore(c *gc.C) {
+	store := bakery.NewMemRootKeyStore()
 	key, err := store.Get([]byte("x"))
 	c.Assert(err, gc.Equals, bakery.ErrNotFound)
 	c.Assert(key, gc.IsNil)

@@ -30,11 +30,11 @@ var _ = math.Inf
 const _ = proto.ProtoPackageIsVersion2 // please upgrade the proto package
 
 type MacaroonId struct {
-	Version   int32  `protobuf:"varint,1,opt,name=version" json:"version,omitempty"`
-	Nonce     []byte `protobuf:"bytes,2,opt,name=nonce,proto3" json:"nonce,omitempty"`
-	StorageId []byte `protobuf:"bytes,3,opt,name=storageId,proto3" json:"storageId,omitempty"`
-	Ops       []*Op  `protobuf:"bytes,4,rep,name=ops" json:"ops,omitempty"`
-	Entity    string `protobuf:"bytes,5,opt,name=entity" json:"entity,omitempty"`
+	Version int32  `protobuf:"varint,1,opt,name=version" json:"version,omitempty"`
+	Nonce   []byte `protobuf:"bytes,2,opt,name=nonce,proto3" json:"nonce,omitempty"`
+	StoreId []byte `protobuf:"bytes,3,opt,name=storeId,proto3" json:"storeId,omitempty"`
+	Ops     []*Op  `protobuf:"bytes,4,rep,name=ops" json:"ops,omitempty"`
+	Entity  string `protobuf:"bytes,5,opt,name=entity" json:"entity,omitempty"`
 }
 
 func (m *MacaroonId) Reset()                    { *m = MacaroonId{} }

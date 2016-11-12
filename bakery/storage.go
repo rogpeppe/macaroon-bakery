@@ -4,8 +4,8 @@ import (
 	"sync"
 )
 
-// Storage defines storage for macaroon root keys.
-type Storage interface {
+// RootKeyStore defines store for macaroon root keys.
+type RootKeyStore interface {
 	// Get returns the root key for the given id.
 	// If the item is not there, it returns ErrNotFound.
 	Get(id []byte) ([]byte, error)
@@ -23,21 +23,21 @@ type Storage interface {
 	RootKey() (rootKey []byte, id []byte, err error)
 }
 
-// NewMemStorage returns an implementation of
-// Storage that generates a single key and always
+// NewMemRootKeyStore returns an implementation of
+// Store that generates a single key and always
 // returns that from RootKey. The same id ("0") is always
 // used.
-func NewMemStorage() Storage {
-	return new(memStorage)
+func NewMemRootKeyStore() RootKeyStore {
+	return new(memRootKeyStore)
 }
 
-type memStorage struct {
+type memRootKeyStore struct {
 	mu  sync.Mutex
 	key []byte
 }
 
-// Get implements Storage.Get.
-func (s *memStorage) Get(id []byte) ([]byte, error) {
+// Get implements Store.Get.
+func (s *memRootKeyStore) Get(id []byte) ([]byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(id) != 1 || id[0] != '0' || s.key == nil {
@@ -46,9 +46,9 @@ func (s *memStorage) Get(id []byte) ([]byte, error) {
 	return s.key, nil
 }
 
-// RootKey implements Storage.RootKey by
+// RootKey implements Store.RootKey by
 //always returning the same root key.
-func (s *memStorage) RootKey() (rootKey, id []byte, err error) {
+func (s *memRootKeyStore) RootKey() (rootKey, id []byte, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.key == nil {

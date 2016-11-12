@@ -1,4 +1,4 @@
-package mgostorage
+package mgorootkeystore
 
 import (
 	"crypto/rand"
@@ -22,9 +22,9 @@ var (
 	mgoCollectionFindId = (*mgo.Collection).FindId
 )
 
-var logger = loggo.GetLogger("bakery.mgostorage")
+var logger = loggo.GetLogger("bakery.mgorootkeystore")
 
-// maxPolicyCache holds the maximum number of storage policies that can
+// maxPolicyCache holds the maximum number of store policies that can
 // hold cached keys in a given RootKeys instance.
 //
 // 100 is probably overkill, given that practical systems will
@@ -43,7 +43,7 @@ type RootKeys struct {
 	oldCache map[string]rootKey
 	cache    map[string]rootKey
 
-	// current holds the current root key for each storage policy.
+	// current holds the current root key for each store policy.
 	current map[Policy]rootKey
 }
 
@@ -62,7 +62,7 @@ func (rk rootKey) isValid() bool {
 }
 
 // isValidWithPolicy reports whether the given root key
-// is currently valid to use with the given storage policy.
+// is currently valid to use with the given store policy.
 func (rk rootKey) isValidWithPolicy(p Policy) bool {
 	if !rk.isValid() {
 		return false
@@ -76,8 +76,8 @@ func (rk rootKey) isValidWithPolicy(p Policy) bool {
 // NewRootKeys returns a root-keys cache that
 // is limited in size to approximately the given size.
 //
-// The NewStorage method returns a storage implementation
-// that uses a specific mongo collection and storage
+// The NewStore method returns a store implementation
+// that uses a specific mongo collection and store
 // policy.
 func NewRootKeys(maxCacheSize int) *RootKeys {
 	return &RootKeys{
@@ -87,7 +87,7 @@ func NewRootKeys(maxCacheSize int) *RootKeys {
 	}
 }
 
-// Policy holds a storage policy for root keys.
+// Policy holds a store policy for root keys.
 type Policy struct {
 	// GenerateInterval holds the maximum length of time
 	// for which a root key will be returned from RootKey.
@@ -101,19 +101,19 @@ type Policy struct {
 	ExpiryDuration time.Duration
 }
 
-// NewStorage returns a new RootKeyStorage implementation that
+// NewStore returns a new RootKeyStore implementation that
 // stores and obtains root keys from the given collection.
 //
 // Root keys will be generated and stored following the
-// given storage policy.
+// given store policy.
 //
-// It is expected that all collections passed to a given Storage's
-// NewStorage method should refer to the same underlying collection.
-func (s *RootKeys) NewStorage(c *mgo.Collection, policy Policy) bakery.Storage {
+// It is expected that all collections passed to a given Store's
+// NewStore method should refer to the same underlying collection.
+func (s *RootKeys) NewStore(c *mgo.Collection, policy Policy) bakery.RootKeyStore {
 	if policy.GenerateInterval == 0 {
 		policy.GenerateInterval = policy.ExpiryDuration
 	}
-	return &storage{
+	return &store{
 		keys:   s,
 		coll:   c,
 		policy: policy,
@@ -128,8 +128,8 @@ var indexes = []mgo.Index{{
 }}
 
 // EnsureIndex ensures that the required indexes exist on the
-// collection that will be used for root key storage.
-// This should be called at least once before using NewStorage.
+// collection that will be used for root key store.
+// This should be called at least once before using NewStore.
 func (s *RootKeys) EnsureIndex(c *mgo.Collection) error {
 	for _, idx := range indexes {
 		if err := c.EnsureIndex(idx); err != nil {
@@ -192,12 +192,12 @@ func (s *RootKeys) addCache(id []byte, k rootKey) {
 	s.cache[string(id)] = k
 }
 
-// setCurrent sets the current key for the given storage policy.
+// setCurrent sets the current key for the given store policy.
 // Called with s.mu locked.
 func (s *RootKeys) setCurrent(policy Policy, key rootKey) {
 	if len(s.current) > maxPolicyCache {
 		// Sanity check to avoid possibly memory leak:
-		// if some client is using arbitrarily many storage
+		// if some client is using arbitrarily many store
 		// policies, we don't want s.keys.current to endlessly
 		// expand, so just kill the cache if it grows too big.
 		// This will result in worse performance but it shouldn't
@@ -208,14 +208,14 @@ func (s *RootKeys) setCurrent(policy Policy, key rootKey) {
 	s.current[policy] = key
 }
 
-type storage struct {
+type store struct {
 	keys   *RootKeys
 	policy Policy
 	coll   *mgo.Collection
 }
 
-// Get implements bakery.RootKeyStorage.Get.
-func (s *storage) Get(id []byte) ([]byte, error) {
+// Get implements bakery.RootKeyStore.Get.
+func (s *store) Get(id []byte) ([]byte, error) {
 	s.keys.mu.Lock()
 	defer s.keys.mu.Unlock()
 
@@ -226,7 +226,7 @@ func (s *storage) Get(id []byte) ([]byte, error) {
 	return key.RootKey, nil
 }
 
-func (s *storage) getFromMongo(id []byte) (rootKey, error) {
+func (s *store) getFromMongo(id []byte) (rootKey, error) {
 	var key rootKey
 	err := mgoCollectionFindId(s.coll, id).One(&key)
 	if err != nil {
@@ -242,7 +242,7 @@ func (s *storage) getFromMongo(id []byte) (rootKey, error) {
 // getLegacyFromMongo gets a value from the old version of the
 // root key document which used a string key rather than a []byte
 // key.
-func (s *storage) getLegacyFromMongo(id string) (rootKey, error) {
+func (s *store) getLegacyFromMongo(id string) (rootKey, error) {
 	var key rootKey
 	err := mgoCollectionFindId(s.coll, id).One(&key)
 	if err != nil {
@@ -254,10 +254,10 @@ func (s *storage) getLegacyFromMongo(id string) (rootKey, error) {
 	return key, nil
 }
 
-// RootKey implements bakery.RootKeyStorage.RootKey by
+// RootKey implements bakery.RootKeyStore.RootKey by
 // returning an existing key from the cache when compatible
 // with the current policy.
-func (s *storage) RootKey() ([]byte, []byte, error) {
+func (s *store) RootKey() ([]byte, []byte, error) {
 	if key := s.rootKeyFromCache(); key.isValid() {
 		return key.RootKey, key.Id, nil
 	}
@@ -268,7 +268,7 @@ func (s *storage) RootKey() ([]byte, []byte, error) {
 	// we don't mind if there are more keys than necessary.
 	//
 	// Note that this query mirrors the logic found in
-	// storage.rootKeyFromCache.
+	// store.rootKeyFromCache.
 	now := timeNow()
 	var key rootKey
 	err := s.coll.Find(bson.D{{
@@ -304,7 +304,7 @@ func (s *storage) RootKey() ([]byte, []byte, error) {
 // rootKeyFromCache returns a root key from the cached keys.
 // If no keys are found that are valid for s.policy, it returns
 // the zero key.
-func (s *storage) rootKeyFromCache() rootKey {
+func (s *store) rootKeyFromCache() rootKey {
 	s.keys.mu.Lock()
 	defer s.keys.mu.Unlock()
 	if k, ok := s.keys.current[s.policy]; ok && k.isValidWithPolicy(s.policy) {
@@ -312,7 +312,7 @@ func (s *storage) rootKeyFromCache() rootKey {
 	}
 
 	// Find the most recently created key that's consistent with the
-	// storage policy.
+	// store policy.
 	var current rootKey
 	for _, k := range s.keys.cache {
 		if k.isValidWithPolicy(s.policy) && k.Created.After(current.Created) {
@@ -326,7 +326,7 @@ func (s *storage) rootKeyFromCache() rootKey {
 	return rootKey{}
 }
 
-func (s *storage) generateKey() (rootKey, error) {
+func (s *store) generateKey() (rootKey, error) {
 	newKey, err := randomBytes(24)
 	if err != nil {
 		return rootKey{}, err
