@@ -21,6 +21,21 @@ var LoginOp = Op{
 	Action: "login",
 }
 
+// Op holds an entity and action to be authorized on that entity.
+type Op struct {
+	// Action holds the action to perform on the entity, such as "read"
+	// or "delete". It is up to the service using a checker to define
+	// a set of operations and keep them consistent over time.
+	Action string
+
+	// Entity holds the name of the entity to be authorized.
+	// Entity names should not contain spaces and should
+	// not start with the prefix "login" or "multi-" (conventionally,
+	// entity names will be prefixed with the entity type followed
+	// by a hyphen.
+	Entity string
+}
+
 var ErrPermissionDenied = errgo.New("permission denied")
 
 type CheckerParams struct {
