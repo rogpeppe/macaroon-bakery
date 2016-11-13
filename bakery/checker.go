@@ -155,7 +155,13 @@ func (c *Checker) Auth(mss []macaroon.Slice) *AuthChecker {
 }
 
 // AuthChecker wraps a Checker with methods that authorize with respect to a particular
-//  authorizes operations with respect to a user's request.
+// authorizes operations with respect to a user's request.
+// The identity is authenticated only once, the first time any method
+// of the AuthChecker is called, using the context passed in then.
+//
+// To find out any declared identity without requiring a login,
+// use Allow(ctxt);. to require authentication but no additional operations,
+// use Allow(ctxt, LoginOp).
 type AuthChecker struct {
 	*Checker
 	macaroons []macaroon.Slice
@@ -248,8 +254,8 @@ func (a *AuthChecker) initOnceFunc(ctxt context.Context) error {
 // be *DischargeRequiredError holding the operations that remain to
 // be authorized in order to allow authorization to
 // proceed.
-func (a *AuthChecker) Allow(ctxt context.Context, ops []Op) (*AuthInfo, error) {
-	authInfo, _, err := a.AllowAny(ctxt, ops)
+func (a *AuthChecker) Allow(ctxt context.Context, ops ...Op) (*AuthInfo, error) {
+	authInfo, _, err := a.AllowAny(ctxt, ops...)
 	if err != nil {
 		return nil, err
 	}
@@ -270,7 +276,7 @@ func (a *AuthChecker) Allow(ctxt context.Context, ops []Op) (*AuthInfo, error) {
 //
 // The LoginOp operation is treated specially - it is always required if
 // present in ops.
-func (a *AuthChecker) AllowAny(ctxt context.Context, ops []Op) (*AuthInfo, []bool, error) {
+func (a *AuthChecker) AllowAny(ctxt context.Context, ops ...Op) (*AuthInfo, []bool, error) {
 	authed, used, err := a.allowAny(ctxt, ops)
 	return a.newAuthInfo(used), authed, err
 }
@@ -397,7 +403,7 @@ func (a *AuthChecker) allowAny(ctxt context.Context, ops []Op) (authed, used []b
 //
 // If ops contains LoginOp, the user must have been authenticated with a
 // macaroon associated with the single operation LoginOp only.
-func (a *AuthChecker) AllowCapability(ctxt context.Context, ops []Op) ([]string, error) {
+func (a *AuthChecker) AllowCapability(ctxt context.Context, ops ...Op) ([]string, error) {
 	nops := 0
 	for _, op := range ops {
 		if op != LoginOp {

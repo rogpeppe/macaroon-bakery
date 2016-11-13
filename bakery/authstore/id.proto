@@ -12,5 +12,5 @@ message MacaroonId {
 
 message Op {
 	string entity = 1;
-	string action = 2;
+	repeated string action = 2;
 }

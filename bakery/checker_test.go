@@ -473,7 +473,7 @@ func (s *httpAuthChecker) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		req1.Method = req.Header.Get("AuthMethod")
 		ops := s.h.EndpointAuth(&req1)
 		logger.Infof("asking for capability for %#v", ops)
-		conditions, err := authChecker.AllowCapability(context.TODO(), ops)
+		conditions, err := authChecker.AllowCapability(context.TODO(), ops...)
 		if err != nil {
 			s.writeError(w, err, req)
 			return
@@ -500,7 +500,7 @@ func (s *httpAuthChecker) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 	ops := s.h.EndpointAuth(req)
 	logger.Infof("got ops %#v for path %v", ops, req.URL)
-	authInfo, err := authChecker.Allow(req.Context(), ops)
+	authInfo, err := authChecker.Allow(req.Context(), ops...)
 	if err != nil {
 		logger.Infof("Allow returned %#v", err)
 		s.writeError(w, err, req)
