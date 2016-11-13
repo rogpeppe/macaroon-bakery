@@ -1,9 +1,18 @@
 package bakery
 
 import (
+	"fmt"
+
 	errgo "gopkg.in/errgo.v1"
 
 	"gopkg.in/macaroon-bakery.v2-unstable/bakery/checkers"
+)
+
+var (
+	// ErrNotFound is returned by Store.Get implementations
+	// to signal that an id has not been found.
+	ErrNotFound            = errgo.New("not found")
+	ErrCaveatResultUnknown = errgo.New("caveat result not known")
 )
 
 // DischargeRequiredError is returned when authorization has failed and a
@@ -41,9 +50,16 @@ func isDischargeRequiredError(err error) bool {
 	return ok
 }
 
-var (
-	// ErrNotFound is returned by Store.Get implementations
-	// to signal that an id has not been found.
-	ErrNotFound            = errgo.New("not found")
-	ErrCaveatResultUnknown = errgo.New("caveat result not known")
-)
+// VerificationError is ... TODO
+type VerificationError struct {
+	Reason error
+}
+
+func (e *VerificationError) Error() string {
+	return fmt.Sprintf("verification failed: %v", e.Reason)
+}
+
+func isVerificationError(err error) bool {
+	_, ok := err.(*VerificationError)
+	return ok
+}

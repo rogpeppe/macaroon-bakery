@@ -67,7 +67,8 @@ type OvenParams struct {
 	Location string
 
 	// Locator is used to find out information on third parties when
-	// adding third party caveats.
+	// adding third party caveats. If this is nil, no non-local third
+	// party caveats can be added.
 	Locator ThirdPartyLocator
 
 	// TODO max macaroon or macaroon id size?
@@ -75,6 +76,15 @@ type OvenParams struct {
 
 // NewOven returns a new oven using the given parameters.
 func NewOven(p OvenParams) *Oven {
+	if p.Locator == nil {
+		p.Locator = emptyLocator{}
+	}
+	if p.RootKeyStoreForOps == nil {
+		store := NewMemRootKeyStore()
+		p.RootKeyStoreForOps = func(ctxt context.Context, ops []Op) (RootKeyStore, error) {
+			return store, nil
+		}
+	}
 	return &Oven{
 		p: p,
 	}
@@ -227,12 +237,30 @@ func (o *Oven) NewMacaroon(ctxt context.Context, version macaroon.Version, expir
 	if err := o.AddCaveat(ctxt, m, checkers.TimeBeforeCaveat(expiry)); err != nil {
 		return nil, errgo.Mask(err)
 	}
-	for _, cav := range caveats {
-		if err := o.AddCaveat(ctxt, m, cav); err != nil {
-			return nil, errgo.Notef(err, "cannot add caveat: %v", err)
-		}
+	if err := o.AddCaveats(ctxt, m, caveats); err != nil {
+		return nil, errgo.Mask(err)
 	}
 	return m, nil
+}
+
+// AddCaveat adds a caveat to the given macaroon.
+func (o *Oven) AddCaveat(ctxt context.Context, m *macaroon.Macaroon, cav checkers.Caveat) error {
+	return AddCaveat(ctxt, o.p.Key, o.p.Locator, m, cav, o.p.Namespace)
+}
+
+// AddCaveats uses o.AddCaveat to add all the given caveats to the macaroon.
+func (o *Oven) AddCaveats(ctxt context.Context, m *macaroon.Macaroon, caveats []checkers.Caveat) error {
+	for _, cav := range caveats {
+		if err := o.AddCaveat(ctxt, m, cav); err != nil {
+			return errgo.Notef(err, "cannot add caveat: %v", err)
+		}
+	}
+	return nil
+}
+
+// Key returns the oven's private/public key par.
+func (o *Oven) Key() *KeyPair {
+	return o.p.Key
 }
 
 // CanonicalOps returns the given operations slice sorted
@@ -289,14 +317,6 @@ func (o *Oven) newMacaroonId(ctxt context.Context, ops []Op, storageId []byte, e
 			Actions: []string{"*"},
 		}},
 	}, nil
-}
-
-// AddCaveat adds a caveat to the given macaroon.
-//
-// It uses the oven's key pair and locator to call
-// the AddCaveat function.
-func (o *Oven) AddCaveat(ctxt context.Context, m *macaroon.Macaroon, cav checkers.Caveat) error {
-	return AddCaveat(ctxt, o.p.Key, o.p.Locator, m, cav, o.p.Namespace)
 }
 
 // newMultiEntity returns a new multi-op entity name that represents
@@ -370,4 +390,14 @@ func (o opsByValue) Swap(i, j int) {
 
 func (o opsByValue) Len() int {
 	return len(o)
+}
+
+func isLowerCaseHexChar(c byte) bool {
+	switch {
+	case '0' <= c && c <= '9':
+		return true
+	case 'a' <= c && c <= 'f':
+		return true
+	}
+	return false
 }

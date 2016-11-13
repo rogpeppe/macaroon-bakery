@@ -100,21 +100,21 @@ type ThirdPartyLocator interface {
 
 // ThirdPartyLocatorMap implements a simple ThirdPartyLocator.
 // A trailing slash on locations is ignored.
-type ThirdPartyLocatorStore struct {
+type ThirdPartyStore struct {
 	m map[string]ThirdPartyInfo
 }
 
-// NewThirdPartyLocatorStore returns a new instance of ThirdPartyLocatorStore
+// NewThirdPartyStore returns a new instance of ThirdPartyStore
 // that stores locations in memory.
-func NewThirdPartyLocatorStore() *ThirdPartyLocatorStore {
-	return &ThirdPartyLocatorStore{
+func NewThirdPartyStore() *ThirdPartyStore {
+	return &ThirdPartyStore{
 		m: make(map[string]ThirdPartyInfo),
 	}
 }
 
 // AddInfo associates the given information with the
 // given location, ignoring any trailing slash.
-func (s *ThirdPartyLocatorStore) AddInfo(loc string, info ThirdPartyInfo) {
+func (s *ThirdPartyStore) AddInfo(loc string, info ThirdPartyInfo) {
 	s.m[canonicalLocation(loc)] = info
 }
 
@@ -123,7 +123,7 @@ func canonicalLocation(loc string) string {
 }
 
 // ThirdPartyInfo implements the ThirdPartyLocator interface.
-func (s *ThirdPartyLocatorStore) ThirdPartyInfo(ctxt context.Context, loc string) (ThirdPartyInfo, error) {
+func (s *ThirdPartyStore) ThirdPartyInfo(ctxt context.Context, loc string) (ThirdPartyInfo, error) {
 	if info, ok := s.m[canonicalLocation(loc)]; ok {
 		return info, nil
 	}
@@ -153,4 +153,10 @@ func GenerateKey() (*KeyPair, error) {
 // public key part of key.
 func (key *KeyPair) String() string {
 	return key.Public.String()
+}
+
+type emptyLocator struct{}
+
+func (emptyLocator) ThirdPartyInfo(context.Context, string) (ThirdPartyInfo, error) {
+	return ThirdPartyInfo{}, ErrNotFound
 }

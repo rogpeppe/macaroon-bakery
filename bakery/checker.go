@@ -154,15 +154,15 @@ func (c *Checker) Auth(mss []macaroon.Slice) *AuthChecker {
 	}
 }
 
-// AuthChecker wraps a Checker with methods that authorize with respect to a particular
-// authorizes operations with respect to a user's request.
+// AuthChecker authorizes operations with respect to a user's request.
 // The identity is authenticated only once, the first time any method
 // of the AuthChecker is called, using the context passed in then.
 //
 // To find out any declared identity without requiring a login,
-// use Allow(ctxt);. to require authentication but no additional operations,
+// use Allow(ctxt); to require authentication but no additional operations,
 // use Allow(ctxt, LoginOp).
 type AuthChecker struct {
+	// Checker is used to check first party caveats.
 	*Checker
 	macaroons []macaroon.Slice
 	// conditions holds the first party caveat conditions
