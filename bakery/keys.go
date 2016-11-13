@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"golang.org/x/crypto/nacl/box"
+	"golang.org/x/net/context"
 	"gopkg.in/errgo.v1"
 )
 
@@ -94,7 +95,7 @@ type ThirdPartyInfo struct {
 type ThirdPartyLocator interface {
 	// ThirdPartyInfo returns information on the third
 	// party at the given location. It returns ErrNotFound if no match is found.
-	ThirdPartyInfo(loc string) (ThirdPartyInfo, error)
+	ThirdPartyInfo(ctxt context.Context, loc string) (ThirdPartyInfo, error)
 }
 
 // ThirdPartyLocatorMap implements a simple ThirdPartyLocator.
@@ -122,7 +123,7 @@ func canonicalLocation(loc string) string {
 }
 
 // ThirdPartyInfo implements the ThirdPartyLocator interface.
-func (s *ThirdPartyLocatorStore) ThirdPartyInfo(loc string) (ThirdPartyInfo, error) {
+func (s *ThirdPartyLocatorStore) ThirdPartyInfo(ctxt context.Context, loc string) (ThirdPartyInfo, error) {
 	if info, ok := s.m[canonicalLocation(loc)]; ok {
 		return info, nil
 	}

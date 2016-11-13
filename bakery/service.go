@@ -13,7 +13,6 @@ import (
 	"strings"
 
 	"github.com/juju/loggo"
-	"github.com/rogpeppe/fastuuid"
 	"golang.org/x/net/context"
 	"gopkg.in/errgo.v1"
 	"gopkg.in/macaroon.v2-unstable"
@@ -22,32 +21,6 @@ import (
 )
 
 var logger = loggo.GetLogger("bakery")
-
-var uuidGen = fastuuid.MustNewGenerator()
-
-// Version represents a version of the bakery protocol.
-type Version int
-
-const (
-	// In version 0, discharge-required errors use status 407
-	Version0 Version = 0
-	// In version 1,  discharge-required errors use status 401.
-	Version1 Version = 1
-	// In version 2, binary macaroons and caveat ids are supported.
-	Version2      Version = 2
-	LatestVersion         = Version2
-)
-
-// MacaroonVersion returns the macaroon version that should
-// be used with the given bakery Version.
-func MacaroonVersion(v Version) macaroon.Version {
-	switch v {
-	case Version0, Version1:
-		return macaroon.V1
-	default:
-		return macaroon.V2
-	}
-}
 
 // Service represents a service which can use macaroons
 // to check authorization.
@@ -117,7 +90,7 @@ func NewService(p NewServiceParams) (*Service, error) {
 
 type emptyLocator struct{}
 
-func (emptyLocator) ThirdPartyInfo(loc string) (ThirdPartyInfo, error) {
+func (emptyLocator) ThirdPartyInfo(context.Context, string) (ThirdPartyInfo, error) {
 	return ThirdPartyInfo{}, ErrNotFound
 }
 
@@ -218,7 +191,7 @@ func (svc *Service) Check(ctxt context.Context, ms macaroon.Slice) error {
 			}
 		}
 	}
-	rootKey, err := svc.store.Get(id)
+	rootKey, err := svc.store.Get(context.TODO(), id)
 	if err != nil {
 		if errgo.Cause(err) != ErrNotFound {
 			return errgo.Notef(err, "cannot get macaroon")
@@ -328,7 +301,7 @@ func (svc *Service) NewMacaroon(version Version, caveats []checkers.Caveat) (*ma
 }
 
 func (svc *Service) rootKey() ([]byte, []byte, error) {
-	rootKey, id, err := svc.store.RootKey()
+	rootKey, id, err := svc.store.RootKey(context.TODO())
 	if err != nil {
 		return nil, nil, errgo.Mask(err)
 	}
@@ -371,7 +344,7 @@ func LocalThirdPartyCaveat(key *PublicKey, version Version) checkers.Caveat {
 // It uses the service's key pair and locator to call
 // the AddCaveat function.
 func (svc *Service) AddCaveat(m *macaroon.Macaroon, cav checkers.Caveat) error {
-	return AddCaveat(svc.key, svc.locator, m, cav, svc.checker.Namespace())
+	return AddCaveat(context.TODO(), svc.key, svc.locator, m, cav, svc.checker.Namespace())
 }
 
 // AddCaveat adds a caveat to the given macaroon.
@@ -387,7 +360,7 @@ func (svc *Service) AddCaveat(m *macaroon.Macaroon, cav checkers.Caveat) error {
 // resulting third-party caveat will encode the condition "true"
 // encrypted with that public key. See LocalThirdPartyCaveat
 // for a way of creating such caveats.
-func AddCaveat(key *KeyPair, loc ThirdPartyLocator, m *macaroon.Macaroon, cav checkers.Caveat, ns *checkers.Namespace) error {
+func AddCaveat(ctxt context.Context, key *KeyPair, loc ThirdPartyLocator, m *macaroon.Macaroon, cav checkers.Caveat, ns *checkers.Namespace) error {
 	if cav.Location == "" {
 		if err := m.AddFirstPartyCaveat(ns.ResolveCaveat(cav).Condition); err != nil {
 			return errgo.Mask(err)
@@ -404,7 +377,7 @@ func AddCaveat(key *KeyPair, loc ThirdPartyLocator, m *macaroon.Macaroon, cav ch
 		cav.Condition = "true"
 	} else {
 		var err error
-		info, err = loc.ThirdPartyInfo(cav.Location)
+		info, err = loc.ThirdPartyInfo(ctxt, cav.Location)
 		if err != nil {
 			return errgo.Notef(err, "cannot find public key for location %q", cav.Location)
 		}
@@ -520,7 +493,7 @@ func (svc *Service) Discharge(checker ThirdPartyChecker, ns *checkers.Namespace,
 		// because we want to use the namespace of the first party
 		// that we're discharging for, not the namespace of the
 		// discharging service.
-		if err := AddCaveat(svc.key, svc.locator, m, cav, ns); err != nil {
+		if err := AddCaveat(context.TODO(), svc.key, svc.locator, m, cav, ns); err != nil {
 			return nil, errgo.Notef(err, "cannot add caveat")
 		}
 	}

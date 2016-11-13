@@ -1,4 +1,6 @@
-package authstore
+// Package macaroonpb is an internal package that allows us to hide the internal
+// serialization details of macaroon ids.
+package macaroonpb
 
 import (
 	"github.com/golang/protobuf/proto"
