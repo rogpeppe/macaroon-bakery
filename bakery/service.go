@@ -140,7 +140,7 @@ func parseLocalLocation(loc string) (ThirdPartyInfo, bool) {
 //
 // The macaroon is created with a version derived from the version
 // that was used to encode the id.
-func Discharge(key *KeyPair, checker ThirdPartyChecker, id []byte) (*macaroon.Macaroon, []checkers.Caveat, error) {
+func Discharge(key *KeyPair, checker ThirdPartyCaveatChecker, id []byte) (*macaroon.Macaroon, []checkers.Caveat, error) {
 	cavInfo, err := decodeCaveatId(key, []byte(id))
 	if err != nil {
 		return nil, nil, errgo.Notef(err, "discharger cannot decode caveat id")
@@ -171,7 +171,7 @@ func Discharge(key *KeyPair, checker ThirdPartyChecker, id []byte) (*macaroon.Ma
 	return m, caveats, nil
 }
 
-func checkNeedDeclared(cavInfo *ThirdPartyCaveatInfo, checker ThirdPartyChecker) ([]checkers.Caveat, error) {
+func checkNeedDeclared(cavInfo *ThirdPartyCaveatInfo, checker ThirdPartyCaveatChecker) ([]checkers.Caveat, error) {
 	arg := cavInfo.Condition
 	i := strings.Index(arg, " ")
 	if i <= 0 {
@@ -260,7 +260,7 @@ type ThirdPartyCaveatInfo struct {
 	Version Version
 }
 
-// ThirdPartyChecker holds a function that checks third party caveats
+// ThirdPartyCaveatChecker holds a function that checks third party caveats
 // for validity. If the caveat is valid, it returns a nil error and
 // optionally a slice of extra caveats that will be added to the
 // discharge macaroon. The caveatId parameter holds the still-encoded id
@@ -268,13 +268,13 @@ type ThirdPartyCaveatInfo struct {
 //
 // If the caveat kind was not recognised, the checker should return an
 // error with a ErrCaveatNotRecognized cause.
-type ThirdPartyChecker interface {
+type ThirdPartyCaveatChecker interface {
 	CheckThirdPartyCaveat(info *ThirdPartyCaveatInfo) ([]checkers.Caveat, error)
 }
 
-type ThirdPartyCheckerFunc func(*ThirdPartyCaveatInfo) ([]checkers.Caveat, error)
+type ThirdPartyCaveatCheckerFunc func(*ThirdPartyCaveatInfo) ([]checkers.Caveat, error)
 
-func (c ThirdPartyCheckerFunc) CheckThirdPartyCaveat(info *ThirdPartyCaveatInfo) ([]checkers.Caveat, error) {
+func (c ThirdPartyCaveatCheckerFunc) CheckThirdPartyCaveat(info *ThirdPartyCaveatInfo) ([]checkers.Caveat, error) {
 	return c(info)
 }
 

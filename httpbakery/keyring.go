@@ -6,6 +6,7 @@ import (
 
 	"github.com/juju/httprequest"
 	"gopkg.in/errgo.v1"
+	"golang.org/x/net/context"
 
 	"gopkg.in/macaroon-bakery.v2-unstable/bakery"
 )
@@ -18,9 +19,9 @@ import (
 // If cache is nil, a new cache will be created.
 //
 // If client is nil, http.DefaultClient will be used.
-func NewThirdPartyLocator(client httprequest.Doer, cache *bakery.ThirdPartyLocatorStore) *ThirdPartyLocator {
+func NewThirdPartyLocator(client httprequest.Doer, cache *bakery.ThirdPartyStore) *ThirdPartyLocator {
 	if cache == nil {
-		cache = bakery.NewThirdPartyLocatorStore()
+		cache = bakery.NewThirdPartyStore()
 	}
 	if client == nil {
 		client = http.DefaultClient
@@ -37,7 +38,7 @@ func NewThirdPartyLocator(client httprequest.Doer, cache *bakery.ThirdPartyLocat
 type ThirdPartyLocator struct {
 	client        httprequest.Doer
 	allowInsecure bool
-	cache         *bakery.ThirdPartyLocatorStore
+	cache         *bakery.ThirdPartyStore
 }
 
 // AllowInsecure allows insecure URLs. This can be useful
@@ -50,7 +51,7 @@ func (kr *ThirdPartyLocator) AllowInsecure() {
 // by first looking in the backing cache and, if that fails,
 // making an HTTP request to find the information associated
 // with the given discharge location.
-func (kr *ThirdPartyLocator) ThirdPartyInfo(loc string) (bakery.ThirdPartyInfo, error) {
+func (kr *ThirdPartyLocator) ThirdPartyInfo(ctxt context.Context, loc string) (bakery.ThirdPartyInfo, error) {
 	u, err := url.Parse(loc)
 	if err != nil {
 		return bakery.ThirdPartyInfo{}, errgo.Notef(err, "invalid discharge URL %q", loc)
@@ -58,7 +59,7 @@ func (kr *ThirdPartyLocator) ThirdPartyInfo(loc string) (bakery.ThirdPartyInfo, 
 	if u.Scheme != "https" && !kr.allowInsecure {
 		return bakery.ThirdPartyInfo{}, errgo.Newf("untrusted discharge URL %q", loc)
 	}
-	info, err := kr.cache.ThirdPartyInfo(loc)
+	info, err := kr.cache.ThirdPartyInfo(ctxt, loc)
 	if err == nil {
 		return info, nil
 	}

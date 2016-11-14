@@ -160,7 +160,7 @@ func (d *Discharger) wait(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	m, err := d.Bakery.Discharge(
-		bakery.ThirdPartyCheckerFunc(
+		bakery.ThirdPartyCaveatCheckerFunc(
 			func(*bakery.ThirdPartyCaveatInfo) ([]checkers.Caveat, error) {
 				return nil, nil
 			},

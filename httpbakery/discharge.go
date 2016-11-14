@@ -11,13 +11,14 @@ import (
 	"github.com/julienschmidt/httprouter"
 	"gopkg.in/errgo.v1"
 	"gopkg.in/macaroon.v2-unstable"
+	"golang.org/x/net/context"
 
 	"gopkg.in/macaroon-bakery.v2-unstable/bakery"
 	"gopkg.in/macaroon-bakery.v2-unstable/bakery/checkers"
 )
 
-// ThirdPartyChecker is used to check third party caveats.
-type ThirdPartyChecker interface {
+// ThirdPartyCaveatChecker is used to check third party caveats.
+type ThirdPartyCaveatChecker interface {
 	// CheckThirdPartyCaveat is used to check whether a client
 	// making the given request should be allowed a discharge for
 	// the given caveat. On success, the caveat will be discharged,
@@ -27,14 +28,14 @@ type ThirdPartyChecker interface {
 	// Note than when used in the context of a discharge handler
 	// created by Discharger, any returned errors will be marshaled
 	// as documented in DischargeHandler.ErrorMapper.
-	CheckThirdPartyCaveat(req *http.Request, info *bakery.ThirdPartyCaveatInfo) ([]checkers.Caveat, error)
+	CheckThirdPartyCaveat(ctxt context.Context, req *http.Request, info *bakery.ThirdPartyCaveatInfo) ([]checkers.Caveat, error)
 }
 
-// ThirdPartyCheckerFunc implements ThirdPartyChecker
+// ThirdPartyCaveatCheckerFunc implements ThirdPartyCaveatChecker
 // by calling a function.
-type ThirdPartyCheckerFunc func(req *http.Request, info *bakery.ThirdPartyCaveatInfo) ([]checkers.Caveat, error)
+type ThirdPartyCaveatCheckerFunc func(req *http.Request, info *bakery.ThirdPartyCaveatInfo) ([]checkers.Caveat, error)
 
-func (f ThirdPartyCheckerFunc) CheckThirdPartyCaveat(req *http.Request, info *bakery.ThirdPartyCaveatInfo) ([]checkers.Caveat, error) {
+func (f ThirdPartyCaveatCheckerFunc) CheckThirdPartyCaveat(ctxt context.Context, req *http.Request, info *bakery.ThirdPartyCaveatInfo) ([]checkers.Caveat, error) {
 	return f(req, info)
 }
 
@@ -59,7 +60,7 @@ func newDischargeClient(location string, client httprequest.Doer) *dischargeClie
 // Discharger holds parameters for creating a new Discharger.
 type DischargerParams struct {
 	// Checker is used to actually check the caveats.
-	Checker ThirdPartyChecker
+	Checker ThirdPartyCaveatChecker
 
 	// Key holds the key pair of the discharger.
 	Key *bakery.KeyPair
@@ -107,16 +108,6 @@ type Discharger struct {
 	p DischargerParams
 }
 
-// NewDischargerFromService returns a new third-party caveat
-// discharger using the key and locator from the given service.
-func NewDischargerFromService(svc *bakery.Service, checker ThirdPartyChecker) *Discharger {
-	return NewDischarger(DischargerParams{
-		Checker: checker,
-		Key:     svc.Key(),
-		Locator: svc.Locator(),
-	})
-}
-
 // NewDischarger returns a new third-party caveat discharger
 // using the given parameters.
 func NewDischarger(p DischargerParams) *Discharger {
@@ -133,7 +124,7 @@ func NewDischarger(p DischargerParams) *Discharger {
 
 type emptyLocator struct{}
 
-func (emptyLocator) ThirdPartyInfo(loc string) (bakery.ThirdPartyInfo, error) {
+func (emptyLocator) ThirdPartyInfo(ctxt context.Context, loc string) (bakery.ThirdPartyInfo, error) {
 	return bakery.ThirdPartyInfo{}, bakery.ErrNotFound
 }
 
@@ -205,16 +196,16 @@ func (h dischargeHandler) Discharge(p httprequest.Params, r *dischargeRequest) (
 	} else {
 		id = []byte(r.Id)
 	}
-	m, caveats, err := bakery.Discharge(h.discharger.p.Key, bakery.ThirdPartyCheckerFunc(
+	m, caveats, err := bakery.Discharge(h.discharger.p.Key, bakery.ThirdPartyCaveatCheckerFunc(
 		func(cav *bakery.ThirdPartyCaveatInfo) ([]checkers.Caveat, error) {
-			return h.discharger.p.Checker.CheckThirdPartyCaveat(p.Request, cav)
+			return h.discharger.p.Checker.CheckThirdPartyCaveat(p.Context, p.Request, cav)
 		},
 	), id)
 	if err != nil {
 		return nil, errgo.NoteMask(err, "cannot discharge", errgo.Any)
 	}
 	for _, cav := range caveats {
-		if err := bakery.AddCaveat(h.discharger.p.Key, h.discharger.p.Locator, m, cav, dischargeNamespace); err != nil {
+		if err := bakery.AddCaveat(p.Context, h.discharger.p.Key, h.discharger.p.Locator, m, cav, dischargeNamespace); err != nil {
 			return nil, errgo.Mask(err)
 		}
 	}

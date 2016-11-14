@@ -315,7 +315,7 @@ func (s *ServiceSuite) TestDischargeTwoNeedDeclared(c *gc.C) {
 	// The client asks for a discharge macaroon for each third party caveat.
 	// Since no declarations are added by the discharger,
 	d, err := bakery.DischargeAll(m, func(cav macaroon.Caveat) (*macaroon.Macaroon, error) {
-		return thirdParty.Discharge(bakery.ThirdPartyCheckerFunc(func(*bakery.ThirdPartyCaveatInfo) ([]checkers.Caveat, error) {
+		return thirdParty.Discharge(bakery.ThirdPartyCaveatCheckerFunc(func(*bakery.ThirdPartyCaveatInfo) ([]checkers.Caveat, error) {
 			return nil, nil
 		}), firstParty.Namespace(), cav.Id)
 
@@ -335,7 +335,7 @@ func (s *ServiceSuite) TestDischargeTwoNeedDeclared(c *gc.C) {
 	// The client asks for a discharge macaroon for each third party caveat.
 	// Since no declarations are added by the discharger,
 	d, err = bakery.DischargeAll(m, func(cav macaroon.Caveat) (*macaroon.Macaroon, error) {
-		return thirdParty.Discharge(bakery.ThirdPartyCheckerFunc(func(cavInfo *bakery.ThirdPartyCaveatInfo) ([]checkers.Caveat, error) {
+		return thirdParty.Discharge(bakery.ThirdPartyCaveatCheckerFunc(func(cavInfo *bakery.ThirdPartyCaveatInfo) ([]checkers.Caveat, error) {
 			switch cavInfo.Condition {
 			case "x":
 				return []checkers.Caveat{
@@ -376,7 +376,7 @@ func (s *ServiceSuite) TestDischargeMacaroonCannotBeUsedAsNormalMacaroon(c *gc.C
 	c.Assert(err, gc.IsNil)
 
 	// Acquire the discharge macaroon, but don't bind it to the original.
-	d, err := thirdParty.Discharge(bakery.ThirdPartyCheckerFunc(func(*bakery.ThirdPartyCaveatInfo) ([]checkers.Caveat, error) {
+	d, err := thirdParty.Discharge(bakery.ThirdPartyCaveatCheckerFunc(func(*bakery.ThirdPartyCaveatInfo) ([]checkers.Caveat, error) {
 		return nil, nil
 	}), firstParty.Namespace(), m.Caveats()[0].Id)
 
