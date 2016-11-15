@@ -2,13 +2,13 @@ package bakery
 
 import (
 	"bytes"
-	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"sort"
 	"strings"
 	"time"
 
+	"golang.org/x/net/context"
 	"github.com/rogpeppe/fastuuid"
 	errgo "gopkg.in/errgo.v1"
 	"gopkg.in/macaroon.v2-unstable"
@@ -36,6 +36,7 @@ type Oven struct {
 
 type OvenParams struct {
 	// Namespace holds the namespace to use when adding first party caveats.
+	// If this is nil, checkers.New(nil).Namespace will be used.
 	Namespace *checkers.Namespace
 
 	// RootKeyStoreForEntity returns the macaroon storage to be
@@ -44,7 +45,7 @@ type OvenParams struct {
 	//
 	// If this is nil, NewMemRootKeyStore will be used to create
 	// a new store to be used for all entities.
-	RootKeyStoreForOps func(ctxt context.Context, ops []Op) (RootKeyStore, error)
+	RootKeyStoreForOps func(ops []Op) RootKeyStore
 
 	// OpsStore is used to persistently store the association of
 	// multi-op entities with their associated operations and
@@ -81,9 +82,12 @@ func NewOven(p OvenParams) *Oven {
 	}
 	if p.RootKeyStoreForOps == nil {
 		store := NewMemRootKeyStore()
-		p.RootKeyStoreForOps = func(ctxt context.Context, ops []Op) (RootKeyStore, error) {
-			return store, nil
+		p.RootKeyStoreForOps = func(ops []Op) RootKeyStore {
+			return store
 		}
+	}
+	if p.Namespace == nil {
+		p.Namespace = checkers.New(nil).Namespace()
 	}
 	return &Oven{
 		p: p,
@@ -103,11 +107,7 @@ func (o *Oven) MacaroonOps(ctxt context.Context, ms macaroon.Slice) (ops []Op, c
 	if err != nil {
 		return nil, nil, errgo.Mask(err)
 	}
-	rootKeyStore, err := o.p.RootKeyStoreForOps(ctxt, ops)
-	if err != nil {
-		return nil, nil, errgo.Mask(err)
-	}
-	rootKey, err := rootKeyStore.Get(ctxt, storageId)
+	rootKey, err := o.p.RootKeyStoreForOps(ops).Get(ctxt, storageId)
 	if err != nil {
 		if errgo.Cause(err) != ErrNotFound {
 			return nil, nil, errgo.Notef(err, "cannot get macaroon")
@@ -197,16 +197,12 @@ func decodeMacaroonId(id []byte) (storageId []byte, ops []Op, err error) {
 //
 // The macaroon will expire at the given time - a TimeBefore first party caveat will be added with
 // that time.
-func (o *Oven) NewMacaroon(ctxt context.Context, version macaroon.Version, expiry time.Time, ops []Op, caveats []checkers.Caveat) (*macaroon.Macaroon, error) {
+func (o *Oven) NewMacaroon(ctxt context.Context, version macaroon.Version, expiry time.Time, caveats []checkers.Caveat, ops ...Op) (*macaroon.Macaroon, error) {
 	if len(ops) == 0 {
 		return nil, errgo.Newf("cannot mint a macaroon associated with no operations")
 	}
 	ops = CanonicalOps(ops)
-	rootKeyStore, err := o.p.RootKeyStoreForOps(ctxt, ops)
-	if err != nil {
-		return nil, errgo.Mask(err)
-	}
-	rootKey, storageId, err := rootKeyStore.RootKey(ctxt)
+	rootKey, storageId, err := o.p.RootKeyStoreForOps(ops).RootKey(ctxt)
 	if err != nil {
 		return nil, errgo.Mask(err)
 	}
@@ -367,7 +363,7 @@ func macaroonIdOps(ops []Op) []*macaroonpb.Op {
 			idOp.Actions = append(idOp.Actions, op.Action)
 		}
 	}
-	idOpPtrs := make([]*macaroonpb.Op, 0, len(idOps))
+	idOpPtrs := make([]*macaroonpb.Op, len(idOps))
 	for i := range idOps {
 		idOpPtrs[i] = &idOps[i]
 	}

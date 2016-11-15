@@ -2,6 +2,7 @@ package bakery_test
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/juju/testing"
 	"golang.org/x/net/context"
@@ -70,47 +71,42 @@ func (*DischargeSuite) TestDischargeAllManyDischarges(c *gc.C) {
 	c.Assert(err, gc.IsNil)
 }
 
+var ages = time.Now().Add(24 * time.Hour)
+
+var loginOps = []bakery.Op{bakery.LoginOp}
+
 func (*DischargeSuite) TestDischargeAllLocalDischarge(c *gc.C) {
-	svc, err := bakery.NewService(bakery.NewServiceParams{})
-	c.Assert(err, gc.IsNil)
+	oc := newOvenChecker()
 
 	clientKey, err := bakery.GenerateKey()
 	c.Assert(err, gc.IsNil)
 
-	m, err := svc.NewMacaroon(bakery.LatestVersion, []checkers.Caveat{
+	m, err := oc.Oven.NewMacaroon(context.Background(), macaroon.LatestVersion, ages, []checkers.Caveat{
 		bakery.LocalThirdPartyCaveat(&clientKey.Public, bakery.LatestVersion),
-	})
+	}, bakery.LoginOp)
 	c.Assert(err, gc.IsNil)
-
+	
 	ms, err := bakery.DischargeAllWithKey(m, noDischarge(c), clientKey)
 	c.Assert(err, gc.IsNil)
-
-	err = svc.Check(context.Background(), ms)
+	
+	_, err = oc.Checker.Auth(ms).Allow(context.Background(), loginOps...)
 	c.Assert(err, gc.IsNil)
 }
 
 func (*DischargeSuite) TestDischargeAllLocalDischargeVersion1(c *gc.C) {
-	svc, err := bakery.NewService(bakery.NewServiceParams{})
-	c.Assert(err, gc.IsNil)
+	oc := newOvenChecker()
 
 	clientKey, err := bakery.GenerateKey()
 	c.Assert(err, gc.IsNil)
 
-	m, err := svc.NewMacaroon(bakery.Version1, []checkers.Caveat{
+	m, err := oc.Oven.NewMacaroon(context.Background(), macaroon.V1, ages, []checkers.Caveat{
 		bakery.LocalThirdPartyCaveat(&clientKey.Public, bakery.Version1),
-	})
+	}, bakery.LoginOp)
 	c.Assert(err, gc.IsNil)
 
 	ms, err := bakery.DischargeAllWithKey(m, noDischarge(c), clientKey)
 	c.Assert(err, gc.IsNil)
 
-	err = svc.Check(context.Background(), ms)
+	_, err = oc.Checker.Auth(ms).Allow(context.Background(), bakery.LoginOp)
 	c.Assert(err, gc.IsNil)
-}
-
-func noDischarge(c *gc.C) func(macaroon.Caveat) (*macaroon.Macaroon, error) {
-	return func(macaroon.Caveat) (*macaroon.Macaroon, error) {
-		c.Errorf("getDischarge called unexpectedly")
-		return nil, fmt.Errorf("nothing")
-	}
 }

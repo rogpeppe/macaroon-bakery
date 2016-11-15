@@ -17,11 +17,14 @@ type IdentityClient interface {
 	// when discharged, can be used to obtain the identity with DeclaredIdentity.
 	//
 	// It should only return an error if it cannot check the identity
-	// (for example because of a database access error).
+	// (for example because of a database access error) - it's
+	// OK to return all zero values when there's
+	// no identity found and no third party to address caveats to.
 	IdentityFromContext(ctxt context.Context) (Identity, []checkers.Caveat, error)
 
 	// DeclaredIdentity parses the identity declaration from the given
 	// declared attributes.
+	// TODO take the set of first party caveat conditions instead?
 	DeclaredIdentity(declared map[string]string) (Identity, error)
 }
 

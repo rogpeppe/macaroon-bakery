@@ -147,7 +147,7 @@ func NewChecker(p CheckerParams) *Checker {
 
 // Auth makes a new AuthChecker instance using the
 // given macaroons to inform authorization decisions.
-func (c *Checker) Auth(mss []macaroon.Slice) *AuthChecker {
+func (c *Checker) Auth(mss ...macaroon.Slice) *AuthChecker {
 	return &AuthChecker{
 		Checker:   c,
 		macaroons: mss,
@@ -226,9 +226,6 @@ func (a *AuthChecker) initOnceFunc(ctxt context.Context) error {
 		identity, caveats, err := a.p.IdentityClient.IdentityFromContext(ctxt)
 		if err != nil {
 			return errgo.Notef(err, "could not determine identity")
-		}
-		if identity == nil && caveats == nil {
-			return errgo.Newf("identity client returned no identity and no caveats")
 		}
 		a.identity, a.identityCaveats = identity, caveats
 	}
@@ -377,7 +374,7 @@ func (a *AuthChecker) allowAny(ctxt context.Context, ops []Op) (authed, used []b
 		return authed, used, nil
 	}
 	logger.Infof("operations still needed after auth check: %#v", stillNeed)
-	if a.identity == nil {
+	if a.identity == nil && len(a.identityCaveats) > 0 {
 		return authed, used, &DischargeRequiredError{
 			Message: "authentication required",
 			Ops:     []Op{LoginOp},
