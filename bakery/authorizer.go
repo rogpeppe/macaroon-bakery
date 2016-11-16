@@ -46,7 +46,7 @@ func (openAuthorizer) Authorize(ctxt context.Context, id Identity, ops []Op) (al
 type closedAuthorizer struct{}
 
 func (closedAuthorizer) Authorize(ctxt context.Context, id Identity, ops []Op) (allowed []bool, caveats []checkers.Caveat, err error) {
-	return make([]bool, len(ops)), nil, ErrPermissionDenied
+	return make([]bool, len(ops)), nil, nil
 }
 
 type authInfoKey struct{}

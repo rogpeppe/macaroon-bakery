@@ -76,7 +76,7 @@ var ages = time.Now().Add(24 * time.Hour)
 var loginOps = []bakery.Op{bakery.LoginOp}
 
 func (*DischargeSuite) TestDischargeAllLocalDischarge(c *gc.C) {
-	oc := newOvenChecker()
+	oc := newOvenChecker("ts", nil)
 
 	clientKey, err := bakery.GenerateKey()
 	c.Assert(err, gc.IsNil)
@@ -85,16 +85,16 @@ func (*DischargeSuite) TestDischargeAllLocalDischarge(c *gc.C) {
 		bakery.LocalThirdPartyCaveat(&clientKey.Public, bakery.LatestVersion),
 	}, bakery.LoginOp)
 	c.Assert(err, gc.IsNil)
-	
+
 	ms, err := bakery.DischargeAllWithKey(m, noDischarge(c), clientKey)
 	c.Assert(err, gc.IsNil)
-	
+
 	_, err = oc.Checker.Auth(ms).Allow(context.Background(), loginOps...)
 	c.Assert(err, gc.IsNil)
 }
 
 func (*DischargeSuite) TestDischargeAllLocalDischargeVersion1(c *gc.C) {
-	oc := newOvenChecker()
+	oc := newOvenChecker("ts", nil)
 
 	clientKey, err := bakery.GenerateKey()
 	c.Assert(err, gc.IsNil)

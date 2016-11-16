@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/net/context"
 	"github.com/rogpeppe/fastuuid"
+	"golang.org/x/net/context"
 	errgo "gopkg.in/errgo.v1"
 	"gopkg.in/macaroon.v2-unstable"
 
@@ -119,7 +119,7 @@ func (o *Oven) MacaroonOps(ctxt context.Context, ms macaroon.Slice) (ops []Op, c
 			Reason: errgo.Newf("macaroon not found in storage"),
 		}
 	}
-	conditions, err = ms[0].VerifiedConditions(rootKey, ms[1:])
+	conditions, err = ms[0].VerifySignature(rootKey, ms[1:])
 	if err != nil {
 		return nil, nil, &VerificationError{
 			Reason: errgo.Mask(err),
@@ -257,6 +257,10 @@ func (o *Oven) AddCaveats(ctxt context.Context, m *macaroon.Macaroon, caveats []
 // Key returns the oven's private/public key par.
 func (o *Oven) Key() *KeyPair {
 	return o.p.Key
+}
+
+func (o *Oven) Locator() ThirdPartyLocator {
+	return o.p.Locator
 }
 
 // CanonicalOps returns the given operations slice sorted

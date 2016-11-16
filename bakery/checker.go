@@ -170,6 +170,7 @@ type AuthChecker struct {
 	conditions      [][]string
 	initOnce        sync.Once
 	initError       error
+	initErrors      []error
 	identity        Identity
 	identityCaveats []checkers.Caveat
 	// authIndexes holds for each potentially authorized operation
@@ -190,7 +191,7 @@ func (a *AuthChecker) initOnceFunc(ctxt context.Context) error {
 	for i, ms := range a.macaroons {
 		ops, conditions, err := a.p.MacaroonOpStore.MacaroonOps(ctxt, ms)
 		if err != nil {
-			logger.Infof("cannot get macaroon info for %q\n", ms[0].Id())
+			a.initErrors = append(a.initErrors, errgo.Notef(err, "cannot get macaroon info"))
 			// TODO log error - if it's a store error, return early here.
 			continue
 		}
@@ -199,19 +200,16 @@ func (a *AuthChecker) initOnceFunc(ctxt context.Context) error {
 			// It's an authn macaroon
 			declared, err := a.checkConditions(ctxt, LoginOp, conditions)
 			if err != nil {
-				logger.Infof("caveat check failed, id %q: %v\n", ms[0].Id(), err)
-				// TODO log error
+				a.initErrors = append(a.initErrors, err)
 				continue
 			}
 			if a.identity != nil {
-				logger.Infof("duplicate authentication macaroon")
-				// TODO log duplicate authn-macaroon error
+				a.initErrors = append(a.initErrors, errgo.Newf("duplicate authentication macaroon"))
 				continue
 			}
 			identity, err := a.p.IdentityClient.DeclaredIdentity(declared)
 			if err != nil {
-				logger.Infof("cannot decode declared identity: %v", err)
-				// TODO log user-decode error
+				a.initErrors = append(a.initErrors, errgo.Notef(err, "cannot decode declared identity: %v", err))
 				continue
 			}
 			a.identity = identity
@@ -225,7 +223,7 @@ func (a *AuthChecker) initOnceFunc(ctxt context.Context) error {
 		// No identity yet, so try to get one based on the context.
 		identity, caveats, err := a.p.IdentityClient.IdentityFromContext(ctxt)
 		if err != nil {
-			return errgo.Notef(err, "could not determine identity")
+			a.initErrors = append(a.initErrors, errgo.Notef(err, "could not determine identity"))
 		}
 		a.identity, a.identityCaveats = identity, caveats
 	}
@@ -303,6 +301,7 @@ func (a *AuthChecker) allowAny(ctxt context.Context, ops []Op) (authed, used []b
 	used = make([]bool, len(a.macaroons))
 	authed = make([]bool, len(ops))
 	numAuthed := 0
+	var errors []error
 	for i, op := range ops {
 		if op == LoginOp && len(ops) > 1 {
 			// LoginOp cannot be combined with other operations in the
@@ -312,8 +311,7 @@ func (a *AuthChecker) allowAny(ctxt context.Context, ops []Op) (authed, used []b
 		for _, mindex := range a.authIndexes[op] {
 			_, err := a.checkConditions(ctxt, op, a.conditions[mindex])
 			if err != nil {
-				logger.Infof("caveat check failed: %v", err)
-				// log error?
+				errors = append(errors, err)
 				continue
 			}
 			authed[i] = true
@@ -382,6 +380,13 @@ func (a *AuthChecker) allowAny(ctxt context.Context, ops []Op) (authed, used []b
 		}
 	}
 	if len(caveats) == 0 {
+		// TODO return all errors?
+		if len(a.initErrors) > 0 {
+			return authed, used, errgo.Notef(a.initErrors[0], "verification failed")
+		}
+		if len(errors) > 0 {
+			return authed, used, errgo.Notef(errors[0], "verification failed")
+		}
 		return authed, used, ErrPermissionDenied
 	}
 	return authed, used, &DischargeRequiredError{

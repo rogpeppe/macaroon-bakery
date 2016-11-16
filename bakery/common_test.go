@@ -1,15 +1,18 @@
 package bakery_test
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"golang.org/x/net/context"
-	"gopkg.in/macaroon.v2-unstable"
 	gc "gopkg.in/check.v1"
+	"gopkg.in/macaroon.v2-unstable"
 
 	"gopkg.in/macaroon-bakery.v2-unstable/bakery"
 	"gopkg.in/macaroon-bakery.v2-unstable/bakery/checkers"
 )
+
+var BC = context.Background()
 
 var testChecker = func() *checkers.Checker {
 	c := checkers.New(nil)
@@ -23,15 +26,16 @@ type ovenChecker struct {
 	Checker *bakery.Checker
 }
 
-func newOvenChecker(location string, locator bakery.ThirdPartyLocator) ovenChecker {
+func newOvenChecker(location string, locator *bakery.ThirdPartyStore) ovenChecker {
 	key, err := bakery.GenerateKey()
 	if err != nil {
 		panic(err)
 	}
 	oven := bakery.NewOven(bakery.OvenParams{
-		Key:      key,
+		Key:       key,
 		Namespace: testChecker.Namespace(),
-		Location: location,
+		Location:  location,
+		Locator:   locator,
 	})
 	if locator != nil {
 		locator.AddInfo(location, bakery.ThirdPartyInfo{
@@ -42,7 +46,7 @@ func newOvenChecker(location string, locator bakery.ThirdPartyLocator) ovenCheck
 	checker := bakery.NewChecker(bakery.CheckerParams{
 		MacaroonOpStore: oven,
 		IdentityClient:  noIdentities{},
-		Checker: testChecker,
+		Checker:         testChecker,
 	})
 	return ovenChecker{oven, checker}
 }
@@ -95,4 +99,27 @@ func strCheck(ctxt context.Context, cond, args string) error {
 		return fmt.Errorf("%s doesn't match %s", cond, expect)
 	}
 	return nil
+}
+
+type thirdPartyStrcmpChecker string
+
+func (c thirdPartyStrcmpChecker) CheckThirdPartyCaveat(cavInfo *bakery.ThirdPartyCaveatInfo) ([]checkers.Caveat, error) {
+	if cavInfo.Condition != string(c) {
+		return nil, fmt.Errorf("%s doesn't match %s", cavInfo.Condition, c)
+	}
+	return nil, nil
+}
+
+type thirdPartyCheckerWithCaveats []checkers.Caveat
+
+func (c thirdPartyCheckerWithCaveats) CheckThirdPartyCaveat(cavInfo *bakery.ThirdPartyCaveatInfo) ([]checkers.Caveat, error) {
+	return c, nil
+}
+
+func macStr(m *macaroon.Macaroon) string {
+	data, err := json.MarshalIndent(m, "\t", "\t")
+	if err != nil {
+		panic(err)
+	}
+	return string(data)
 }
