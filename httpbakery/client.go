@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"local/runtime/debug"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -227,12 +228,30 @@ func (c *Client) DoWithCustomError(req *http.Request, getError func(resp *http.R
 
 func (c *Client) do(ctx context.Context, req *http.Request, getError func(resp *http.Response) error) (*http.Response, error) {
 	logger.Debugf("client do %s %s {", req.Method, req.URL)
+	logger.Debugf("stack: %s", debug.Callers(0, 500))
 	resp, err := c.do1(ctx, req, getError)
 	logger.Debugf("} -> error %#v", err)
 	return resp, err
 }
 
+const maxRecursionDepth = 3
+
+type recursionKey struct{}
+
+func guardRecursion(ctx context.Context) context.Context {
+	n, _ := ctx.Value(recursionKey{}).(int)
+	if n > maxRecursionDepth {
+		return nil
+	}
+	return context.WithValue(ctx, recursionKey{}, n+1)
+}
+
 func (c *Client) do1(ctx context.Context, req *http.Request, getError func(resp *http.Response) error) (*http.Response, error) {
+	ctx = guardRecursion(ctx)
+	if ctx == nil {
+		return nil, errgo.Newf("httpbakery request recursion depth limit exceeded")
+	}
+	logger.Infof("httpbakery Client.do1")
 	if getError == nil {
 		getError = DefaultGetError
 	}
@@ -253,8 +272,10 @@ func (c *Client) do1(ctx context.Context, req *http.Request, getError func(resp 
 	// the macaroon in it.
 	retry := 0
 	for {
+		logger.Infof("httpbakery.Client.do1 retry %d", retry)
 		resp, err := c.do2(ctx, rreq, getError)
 		if err == nil || !isDischargeRequiredError(err) {
+			logger.Infof("not discharge required error %#v (%T)", errgo.Cause(err), errgo.Cause(err))
 			return resp, errgo.Mask(err, errgo.Any)
 		}
 		if retry++; retry > maxDischargeRetries {
@@ -422,6 +443,7 @@ func appendURLElem(u, elem string) string {
 // AcquireDischarge implements DischargeAcquirer by requesting a discharge
 // macaroon from the caveat location as an HTTP URL.
 func (c *Client) AcquireDischarge(ctx context.Context, cav macaroon.Caveat, payload []byte) (*bakery.Macaroon, error) {
+	logger.Infof("Client.AcquireDischarge id %q; payload %q", cav.Id, payload)
 	dclient := newDischargeClient(cav.Location, c)
 	var id, id64 string
 	if utf8.Valid(cav.Id) {
@@ -456,6 +478,7 @@ func (c *Client) AcquireDischarge(ctx context.Context, cav macaroon.Caveat, payl
 	// the relative URL calculations work correctly even when
 	// cav.Location doesn't have a trailing slash.
 	loc := appendURLElem(cav.Location, "")
+	logger.Infof("interaction required (visit %v; wait %v)", cause.Info.VisitURL, cause.Info.WaitURL)
 	m, err := c.interact(ctx, loc, cause.Info.VisitURL, cause.Info.WaitURL)
 	if err != nil {
 		return nil, errgo.Mask(err, IsDischargeError, IsInteractionError)
