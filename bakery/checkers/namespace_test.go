@@ -76,8 +76,8 @@ func (*NamespaceSuite) TestRegisterBadURI(c *gc.C) {
 func (*NamespaceSuite) TestRegisterBadPrefix(c *gc.C) {
 	ns := checkers.NewNamespace(nil)
 	c.Assert(func() {
-		ns.Register("std", "x:1")
-	}, gc.PanicMatches, `cannot register invalid prefix "x:1" for URI "std"`)
+		ns.Register("/std", "x:1")
+	}, gc.PanicMatches, `cannot register invalid prefix "x:1" for URI "/std"`)
 }
 
 var resolveCaveatTests = []struct {
@@ -145,18 +145,18 @@ var namespaceMarshalTests = []struct {
 }, {
 	about: "standard namespace",
 	ns: map[string]string{
-		"std": "",
+		"/std": "",
 	},
-	expect: "std:",
+	expect: "/std:",
 }, {
 	about: "several elements",
 	ns: map[string]string{
-		"std":              "",
+		"/std":              "",
 		"http://blah.blah": "blah",
 		"one":              "two",
 		"foo.com/x.v0.1":   "z",
 	},
-	expect: "foo.com/x.v0.1:z http://blah.blah:blah one:two std:",
+	expect: "/std: foo.com/x.v0.1:z http://blah.blah:blah one:two",
 }, {
 	about: "sort by URI not by field",
 	ns: map[string]string{
@@ -215,8 +215,8 @@ var namespaceUnmarshalTests = []struct {
 	expectError: `invalid prefix "\\xff" in namespace field "p:\\xff"`,
 }, {
 	about:       "duplicate URI",
-	text:        "std: std:p",
-	expectError: `duplicate URI "std" in namespace "std: std:p"`,
+	text:        "/std: /std:p",
+	expectError: `duplicate URI "/std" in namespace "/std: /std:p"`,
 }}
 
 func (*NamespaceSuite) TestUnmarshal(c *gc.C) {

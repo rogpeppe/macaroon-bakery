@@ -12,7 +12,7 @@ import (
 )
 
 // StdNamespace holds the URI of the standard checkers schema.
-const StdNamespace = "std"
+const StdNamespace = "/std"
 
 // Constants for all the standard caveat conditions.
 // First and third party caveat conditions are both defined here,
