@@ -758,50 +758,11 @@ func (s *ClientSuite) TestDischargeWithInteractionRequiredError(c *gc.C) {
 
 	errCannotVisit := errgo.New("cannot visit")
 	client := httpbakery.NewClient()
-	client.VisitWebPage = func(*url.URL) error {
-		return errCannotVisit
-	}
-
-	// Make the request to the server.
-	resp, err := client.Do(req)
-	c.Assert(err, gc.ErrorMatches, `cannot get discharge from "https://.*": cannot start interactive session: cannot visit`)
-	c.Assert(httpbakery.IsInteractionError(errgo.Cause(err)), gc.Equals, true)
-	ierr, ok := errgo.Cause(err).(*httpbakery.InteractionError)
-	c.Assert(ok, gc.Equals, true)
-	c.Assert(ierr.Reason, gc.Equals, errCannotVisit)
-	c.Assert(resp, gc.IsNil)
-}
-
-func (s *ClientSuite) TestDischargeWithInteractionRequiredErrorAndWebPageVisitor(c *gc.C) {
-	d := bakerytest.NewDischarger(nil, bakerytest.ConditionParser(func(cond, arg string) ([]checkers.Caveat, error) {
-		return nil, &httpbakery.Error{
-			Code:    httpbakery.ErrInteractionRequired,
-			Message: "interaction required",
-			Info: &httpbakery.ErrorInfo{
-				VisitURL: "http://0.1.2.3/",
-				WaitURL:  "http://0.1.2.3/",
-			},
-		}
-	}))
-	defer d.Close()
-
-	// Create a target service.
-	b := newBakery("loc", d, nil)
-
-	ts := httptest.NewServer(serverHandler(serverHandlerParams{
-		bakery:       b,
-		authLocation: d.Location(),
-	}))
-	defer ts.Close()
-
-	// Create a client request.
-	req, err := http.NewRequest("GET", ts.URL, nil)
-	c.Assert(err, gc.IsNil)
-
-	errCannotVisit := errgo.New("cannot visit")
-	client := httpbakery.NewClient()
-	client.WebPageVisitor = visitorFunc(func(_ *httpbakery.Client, m map[string]*url.URL) error {
-		return errCannotVisit
+	client.AddInteractor(legacyInteractor{
+		kind: httpbakery.BrowserWindowInteractionKind,
+		legacyInteract: func(ctx context.Context, client *httpbakery.Client, visitURL *url.URL) error {
+			return errCannotVisit
+		},
 	})
 
 	// Make the request to the server.
@@ -810,7 +771,7 @@ func (s *ClientSuite) TestDischargeWithInteractionRequiredErrorAndWebPageVisitor
 	c.Assert(httpbakery.IsInteractionError(errgo.Cause(err)), gc.Equals, true)
 	ierr, ok := errgo.Cause(err).(*httpbakery.InteractionError)
 	c.Assert(ok, gc.Equals, true)
-	c.Assert(ierr.Reason, gc.Equals, errCannotVisit)
+	c.Assert(errgo.Cause(ierr.Reason), gc.Equals, errCannotVisit)
 	c.Assert(resp, gc.IsNil)
 }
 
@@ -863,14 +824,17 @@ func (s *ClientSuite) TestDischargeWithVisitURLError(c *gc.C) {
 		visitor.respond = test.respond
 
 		client := httpbakery.NewClient()
-		client.VisitWebPage = func(u *url.URL) error {
-			resp, err := http.Get(u.String())
-			if err != nil {
-				return err
-			}
-			resp.Body.Close()
-			return nil
-		}
+		client.AddInteractor(legacyInteractor{
+			kind: httpbakery.BrowserWindowInteractionKind,
+			legacyInteract: func(ctx context.Context, client *httpbakery.Client, visitURL *url.URL) error {
+				resp, err := http.Get(visitURL.String())
+				if err != nil {
+					return err
+				}
+				resp.Body.Close()
+				return nil
+			},
+		})
 
 		// Create a client request.
 		req, err := http.NewRequest("GET", ts.URL, nil)
@@ -1306,4 +1270,39 @@ func checkIsSomething(ctx context.Context, _, arg string) error {
 
 func noCaveatChecker(_ *http.Request, cond, arg string) ([]checkers.Caveat, error) {
 	return nil, nil
+}
+
+type interactor struct {
+	kind     string
+	interact func(ctx context.Context, client *httpbakery.Client, location string, interactionRequiredErr *httpbakery.Error) (*bakery.Macaroon, error)
+}
+
+func (i interactor) Kind() string {
+	return i.kind
+}
+
+func (i interactor) Interact(ctx context.Context, client *httpbakery.Client, location string, interactionRequiredErr *httpbakery.Error) (*bakery.Macaroon, error) {
+	return i.interact(ctx, client, location, interactionRequiredErr)
+}
+
+type legacyInteractor struct {
+	kind           string
+	interact       func(ctx context.Context, client *httpbakery.Client, location string, interactionRequiredErr *httpbakery.Error) (*bakery.Macaroon, error)
+	legacyInteract func(ctx context.Context, client *httpbakery.Client, visitURL *url.URL) error
+}
+
+func (i legacyInteractor) Kind() string {
+	return i.kind
+}
+
+func (i legacyInteractor) Interact(ctx context.Context, client *httpbakery.Client, location string, interactionRequiredErr *httpbakery.Error) (*bakery.Macaroon, error) {
+	if i.interact == nil {
+		panic("really")
+		return nil, errgo.Newf("non-legacy interaction not supported")
+	}
+	return i.interact(ctx, client, location, interactionRequiredErr)
+}
+
+func (i legacyInteractor) LegacyInteract(ctx context.Context, client *httpbakery.Client, visitURL *url.URL) error {
+	return i.legacyInteract(ctx, client, visitURL)
 }

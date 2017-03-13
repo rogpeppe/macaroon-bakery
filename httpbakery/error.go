@@ -1,6 +1,7 @@
 package httpbakery
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -25,9 +26,10 @@ func (e ErrorCode) ErrorCode() ErrorCode {
 }
 
 const (
-	ErrBadRequest          = ErrorCode("bad request")
-	ErrDischargeRequired   = ErrorCode("macaroon discharge required")
-	ErrInteractionRequired = ErrorCode("interaction required")
+	ErrBadRequest                = ErrorCode("bad request")
+	ErrDischargeRequired         = ErrorCode("macaroon discharge required")
+	ErrInteractionRequired       = ErrorCode("interaction required")
+	ErrInteractionMethodNotFound = ErrorCode("discharger does not provide an supported interaction method")
 )
 
 var (
@@ -78,18 +80,58 @@ type ErrorInfo struct {
 	// macaroon.Signature() in hex).
 	CookieNameSuffix string `json:",omitempty"`
 
-	// VisitURL and WaitURL are associated with the
+	// The following fields are associated with the
 	// ErrInteractionRequired error code.
+
+	// InteractionMethods holds the set of methods that the
+	// third party supports for completing the discharge.
+	// See InteractionMethod for a more convenient
+	// accessor method.
+	InteractionMethods map[string]*json.RawMessage
 
 	// VisitURL holds a URL that the client should visit
 	// in a web browser to authenticate themselves.
+	// This is deprecated - it is superceded by the InteractionMethods
+	// field.
 	VisitURL string `json:",omitempty"`
 
 	// WaitURL holds a URL that the client should visit
 	// to acquire the discharge macaroon. A GET on
 	// this URL will block until the client has authenticated,
 	// and then it will return the discharge macaroon.
+	// This is deprecated - it is superceded by the InteractionMethods
+	// field.
 	WaitURL string `json:",omitempty"`
+}
+
+// InteractionMethod checks whether the error is an InteractionRequired error
+// that implements the method with the given name, and JSON-unmarshals the
+// method-specific data into x.
+func (e *Error) InteractionMethod(name string, x interface{}) error {
+	if e.Info == nil || e.Code != ErrInteractionRequired {
+		return errgo.Newf("not an interaction-required error (code %v)", e.Code)
+	}
+	var data []byte
+	if e.Info.InteractionMethods == nil && e.Info.VisitURL != "" {
+		// Legacy error - pretend we had the more recent
+		// data and use that.
+		data1, err := json.Marshal(visitWaitParams{
+			VisitURL: e.Info.VisitURL,
+			WaitURL:  e.Info.WaitURL,
+		})
+		if err != nil {
+			return errgo.Mask(err)
+		}
+		data = data1
+	} else if m := e.Info.InteractionMethods[name]; m != nil {
+		data = *m
+	} else {
+		return errgo.WithCausef(nil, ErrInteractionMethodNotFound, "interaction method %q not found", name)
+	}
+	if err := json.Unmarshal(data, x); err != nil {
+		return errgo.Notef(err, "cannot unmarshal data for interaction method %q", name)
+	}
+	return nil
 }
 
 func (e *Error) Error() string {
