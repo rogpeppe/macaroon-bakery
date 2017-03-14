@@ -791,7 +791,7 @@ var dischargeWithVisitURLErrorTests = []struct {
 		w.Write([]byte("bad response"))
 	},
 	// TODO fix this unhelpful error message
-	expectError: `cannot get discharge from ".*": cannot unmarshal wait response: invalid character 'b' looking for beginning of value`,
+	expectError: `cannot get discharge from ".*": cannot unmarshal wait response: unexpected content type text/plain; want application/json; content: bad response`,
 }}
 
 func (s *ClientSuite) TestDischargeWithVisitURLError(c *gc.C) {
