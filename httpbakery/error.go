@@ -104,10 +104,31 @@ type ErrorInfo struct {
 	WaitURL string `json:",omitempty"`
 }
 
+// SetInteraction sets the information for a particular
+// interaction kind to x.. The error should be an interaction-required
+// error. This method will panic if x cannot be JSON-marshaled.
+// In general, this method should not be used directly - higher
+// level SetInteraction methods implemented by specific
+// implementations should be used instead.
+func (e *Error) SetInteraction(kind string, x interface{}) {
+	if e.Info == nil {
+		e.Info = new(ErrorInfo)
+	}
+	if e.Info.InteractionMethods == nil {
+		e.Info.InteractionMethods = make(map[string]*json.RawMessage)
+	}
+	data, err := json.Marshal(x)
+	if err != nil {
+		panic(err)
+	}
+	m := json.RawMessage(data)
+	e.Info.InteractionMethods[kind] = &m
+}
+
 // InteractionMethod checks whether the error is an InteractionRequired error
 // that implements the method with the given name, and JSON-unmarshals the
 // method-specific data into x.
-func (e *Error) InteractionMethod(name string, x interface{}) error {
+func (e *Error) InteractionMethod(kind string, x interface{}) error {
 	if e.Info == nil || e.Code != ErrInteractionRequired {
 		return errgo.Newf("not an interaction-required error (code %v)", e.Code)
 	}
@@ -123,13 +144,13 @@ func (e *Error) InteractionMethod(name string, x interface{}) error {
 			return errgo.Mask(err)
 		}
 		data = data1
-	} else if m := e.Info.InteractionMethods[name]; m != nil {
+	} else if m := e.Info.InteractionMethods[kind]; m != nil {
 		data = *m
 	} else {
-		return errgo.WithCausef(nil, ErrInteractionMethodNotFound, "interaction method %q not found", name)
+		return errgo.WithCausef(nil, ErrInteractionMethodNotFound, "interaction method %q not found", kind)
 	}
 	if err := json.Unmarshal(data, x); err != nil {
-		return errgo.Notef(err, "cannot unmarshal data for interaction method %q", name)
+		return errgo.Notef(err, "cannot unmarshal data for interaction method %q", kind)
 	}
 	return nil
 }
@@ -252,11 +273,17 @@ func NewDischargeRequiredError(m *bakery.Macaroon, path string, originalErr erro
 // to the given request. The originalErr value describes the original
 // error - if it is nil, a default message will be provided.
 //
-// See Error.ErrorInfo for more details of visitURL and waitURL.
-//
 // This function should be used in preference to creating the Error value
 // directly, as it sets the bakery protocol version correctly in the error.
-func NewInteractionRequiredError(visitURL, waitURL string, originalErr error, req *http.Request) error {
+//
+// The returned error does not support any interaction kinds.
+// Use kind-specific SetInteraction methods (for example
+// WebBrowserInteractor.SetInteraction) to add supported
+// interaction kinds.
+//
+// Note that WebBrowserInteractor.SetInteraction should always be called 
+// for legacy clients to maintain backwards compatibility.
+func NewInteractionRequiredError(originalErr error, req *http.Request) *Error {
 	if originalErr == nil {
 		originalErr = ErrInteractionRequired
 	}
@@ -264,10 +291,6 @@ func NewInteractionRequiredError(visitURL, waitURL string, originalErr error, re
 		Message: originalErr.Error(),
 		version: RequestVersion(req),
 		Code:    ErrInteractionRequired,
-		Info: &ErrorInfo{
-			VisitURL: visitURL,
-			WaitURL:  waitURL,
-		},
 	}
 }
 

@@ -775,6 +775,18 @@ func (s *ClientSuite) TestDischargeWithInteractionRequiredError(c *gc.C) {
 	c.Assert(resp, gc.IsNil)
 }
 
+func (s *ClientSuite) TestDischargeWithInteractionRequiredErrorWithMultipleInteractors(c *gc.C) {
+	srv := httptest.NewServer(newVisitHandler(XXXX))
+	d := bakerytest.NewDischarger(nil, bakerytest.ConditionParser(func(cond, arg string) ([]checkers.Caveat, error) {
+		err := &httpbakery.Error{
+			Code:    httpbakery.ErrInteractionRequired,
+			Message: "interaction required",
+		}
+		httpbakery.WebBrowserWindowInteractor.SetInteraction(err, 
+		return nil, 
+	}))
+}
+
 var dischargeWithVisitURLErrorTests = []struct {
 	about       string
 	respond     func(http.ResponseWriter)

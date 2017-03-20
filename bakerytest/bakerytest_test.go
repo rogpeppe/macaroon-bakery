@@ -171,6 +171,11 @@ func (s *suite) TestInteractiveDischarger(c *gc.C) {
 
 	c.Assert(err, gc.IsNil)
 	client := httpbakery.NewClient()
+	client.AddInteractor(legacyInteractor{
+		kind: BrowserWindowInteractionKind,
+		interact: func(ctx context.Context, client *httpbakery.Client, location string, interactionRequiredErr *httpbakery.Error) (*bakery.Macaroon, error) {
+		},
+	}
 	client.VisitWebPage = func(u *url.URL) error {
 		var c httprequest.Client
 		return c.Get(testContext, u.String(), nil)
@@ -273,4 +278,30 @@ func mustGenerateKey() *bakery.KeyPair {
 		panic(err)
 	}
 	return key
+}
+
+type interactor struct {
+	kind     string
+	interact func(ctx context.Context, client *httpbakery.Client, location string, interactionRequiredErr *httpbakery.Error) (*bakery.Macaroon, error)
+}
+
+func (i interactor) Kind() string {
+	return i.kind
+}
+
+func (i interactor) Interact(ctx context.Context, client *httpbakery.Client, location string, interactionRequiredErr *httpbakery.Error) (*bakery.Macaroon, error) {
+	return i.interact(ctx, client, location, interactionRequiredErr)
+}
+
+// Interactor implements bakery.Interactor by calling itself
+// to return to obtain the macaroon to return from the Interact
+// method.
+type Interactor func() *macaroon.Macaroon
+
+func (f Interactor) Kind() string {
+	return "test"
+}
+
+func (f Interactor) Interact(ctx context.Context, client *Client, location string, irErr *Error) (*bakery.Macaroon, error) {
+	return f()
 }

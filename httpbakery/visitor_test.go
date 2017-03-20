@@ -14,13 +14,13 @@ import (
 	"gopkg.in/macaroon-bakery.v2-unstable/httpbakery"
 )
 
-type VisitorSuite struct {
+type InteractorSuite struct {
 	jujutesting.LoggingSuite
 }
 
 var _ = gc.Suite(&VisitorSuite{})
 
-func (*VisitorSuite) TestLegacyGetInteractionMethodsGetFailure(c *gc.C) {
+func (*InteractorSuite) TestLegacyGetInteractionMethodsGetFailure(c *gc.C) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		w.WriteHeader(http.StatusTeapot)
 		w.Write([]byte("failure"))
@@ -32,7 +32,7 @@ func (*VisitorSuite) TestLegacyGetInteractionMethodsGetFailure(c *gc.C) {
 	c.Assert(err, gc.ErrorMatches, `Get .*: cannot unmarshal error response \(status 418 I'm a teapot\): unexpected content type text/plain; want application/json; content: failure`)
 }
 
-func (*VisitorSuite) TestLegacyGetInteractionMethodsSuccess(c *gc.C) {
+func (*InteractorSuite) TestLegacyGetInteractionMethodsSuccess(c *gc.C) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{"method": "http://somewhere/something"}`)
@@ -50,7 +50,7 @@ func (*VisitorSuite) TestLegacyGetInteractionMethodsSuccess(c *gc.C) {
 	})
 }
 
-func (*VisitorSuite) TestLegacyGetInteractionMethodsInvalidURL(c *gc.C) {
+func (*InteractorSuite) TestLegacyGetInteractionMethodsInvalidURL(c *gc.C) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{"method": ":::"}`)
@@ -62,12 +62,31 @@ func (*VisitorSuite) TestLegacyGetInteractionMethodsInvalidURL(c *gc.C) {
 	c.Assert(err, gc.ErrorMatches, `invalid URL for interaction method "method": parse :::: missing protocol scheme`)
 }
 
-//func (*VisitorSuite) TestMultiVisitorNoUserInteractionMethod(c *gc.C) {
-//	v := httpbakery.NewMultiVisitor()
-//	err := v.VisitWebPage(testContext, httpbakery.NewClient(), nil)
-//	c.Assert(err, gc.ErrorMatches, `cannot get interaction methods because no "interactive" URL found`)
-//}
-//
+func (*InteractorSuite) Test(c *gc.C) {
+	initialPage := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		initialPage++
+		fmt.Fprint(w, `<html>oh yes</html>`)
+	}))
+	defer srv.Close()
+	methods := map[string]*url.URL{
+		httpbakery.UserInteractionMethod: mustParseURL(srv.URL),
+	}
+	visited := 0
+	v := httpbakery.NewMultiVisitor(
+		visitorFunc(func(_ *httpbakery.Client, m map[string]*url.URL) error {
+			c.Check(m, jc.DeepEquals, methods)
+			visited++
+			return nil
+		}),
+	)
+	err := v.VisitWebPage(testContext, httpbakery.NewClient(), methods)
+	c.Assert(err, gc.IsNil)
+	c.Assert(initialPage, gc.Equals, 1)
+	c.Assert(visited, gc.Equals, 1)
+}
+
 //func (*VisitorSuite) TestMultiVisitorNoInteractionMethods(c *gc.C) {
 //	initialPage := 0
 //	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {

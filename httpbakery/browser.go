@@ -31,12 +31,30 @@ func OpenWebBrowser(url *url.URL) error {
 	return err
 }
 
-var WebBrowserWindowInteractor Interactor = webBrowserInteractor{}
+type WebBrowserInteractor struct{}
 
-type webBrowserInteractor struct{}
+// WebBrowserInteractor represents an interaction method
+// that requires the user to open a web browser window
+// to authenticate. It implements Interactor.
+var WebBrowserWindowInteractor WebBrowserInteractor
 
-func (wi webBrowserInteractor) Kind() string {
+func (WebBrowserInteractor) Kind() string {
 	return BrowserWindowInteractionKind
+}
+
+// SetInteraction sets interaction information on the given error.
+// The visitURL parameter holds a URL that should be
+// visited by the user in a web browser; the waitURL parameter
+// holds a URL that can be long-polled to acquire the resulting
+// discharge macaroon.
+func (i WebBrowserInteractor) SetInteraction(e *Error, visitURL, waitURL string) {
+	e.SetInteraction(i.Kind(), visitWaitParams{
+		VisitURL: visitURL,
+		WaitURL: waitURL,
+	})
+	// Set the visit and wait URLs for legacy clients too.
+	e.Info.VisitURL = visitURL
+	e.Info.WaitURL = waitURL
 }
 
 type visitWaitParams struct {
@@ -45,7 +63,7 @@ type visitWaitParams struct {
 }
 
 // Interact implements Interactor.Interact by opening a new web page.
-func (wi webBrowserInteractor) Interact(ctx context.Context, client *Client, location string, irErr *Error) (*bakery.Macaroon, error) {
+func (wi WebBrowserInteractor) Interact(ctx context.Context, client *Client, location string, irErr *Error) (*bakery.Macaroon, error) {
 	var p visitWaitParams
 	if err := irErr.InteractionMethod(wi.Kind(), &p); err != nil {
 		return nil, errgo.Mask(err)
@@ -65,6 +83,6 @@ func (wi webBrowserInteractor) Interact(ctx context.Context, client *Client, loc
 }
 
 // LegacyInteract implements LegacyInteractor by opening a web browser page.
-func (wi webBrowserInteractor) LegacyInteract(ctx context.Context, client *Client, visitURL *url.URL) error {
+func (wi WebBrowserInteractor) LegacyInteract(ctx context.Context, client *Client, visitURL *url.URL) error {
 	return OpenWebBrowser(visitURL)
 }

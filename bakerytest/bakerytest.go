@@ -279,7 +279,9 @@ func (d *InteractiveDischarger) CheckThirdPartyCaveat(ctx context.Context, req *
 	d.mu.Unlock()
 	visitURL := "/visit?waitid=" + id
 	waitURL := "/wait?waitid=" + id
-	return nil, httpbakery.NewInteractionRequiredError(visitURL, waitURL, nil, req)
+	err := httpbakery.NewInteractionRequiredError(nil, req)
+	httpbakery.WebBrowserWindowInteractor.SetInteraction(err, visitURL, waitURL)
+	return nil, err
 }
 
 var dischargeNamespace = httpbakery.NewChecker().Namespace()
@@ -307,8 +309,7 @@ func (d *InteractiveDischarger) wait(w http.ResponseWriter, r *http.Request) {
 		err = res.err
 		cavs = res.cavs
 	case <-time.After(5 * time.Minute):
-		code, body := httpbakery.ErrorToResponse(ctx, errgo.New("timeout waiting for interaction to complete"))
-		httprequest.WriteJSON(w, code, body)
+		err = errgo.New("timeout waiting for interaction to complete")
 		return
 	}
 	if err != nil {
