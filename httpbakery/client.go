@@ -140,6 +140,8 @@ type Interactor interface {
 	Kind() string
 
 	// Interact performs the interaction, and returns the discharge macaroon.
+	// The location provides the third part caveat location to make
+	// it possible to use relative URLs.
 	Interact(ctx context.Context, client *Client, location string, interactionRequiredErr *Error) (*bakery.Macaroon, error)
 }
 

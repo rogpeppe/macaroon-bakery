@@ -50,7 +50,7 @@ func (WebBrowserInteractor) Kind() string {
 func (i WebBrowserInteractor) SetInteraction(e *Error, visitURL, waitURL string) {
 	e.SetInteraction(i.Kind(), visitWaitParams{
 		VisitURL: visitURL,
-		WaitURL: waitURL,
+		WaitURL:  waitURL,
 	})
 	// Set the visit and wait URLs for legacy clients too.
 	e.Info.VisitURL = visitURL

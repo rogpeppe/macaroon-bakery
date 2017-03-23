@@ -281,7 +281,7 @@ func NewDischargeRequiredError(m *bakery.Macaroon, path string, originalErr erro
 // WebBrowserInteractor.SetInteraction) to add supported
 // interaction kinds.
 //
-// Note that WebBrowserInteractor.SetInteraction should always be called 
+// Note that WebBrowserInteractor.SetInteraction should always be called
 // for legacy clients to maintain backwards compatibility.
 func NewInteractionRequiredError(originalErr error, req *http.Request) *Error {
 	if originalErr == nil {
