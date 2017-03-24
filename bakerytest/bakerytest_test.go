@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/juju/httprequest"
 	"golang.org/x/net/context"
 	gc "gopkg.in/check.v1"
 	"gopkg.in/errgo.v1"
@@ -149,19 +148,22 @@ func (s *suite) TestConcurrentDischargers(c *gc.C) {
 func (s *suite) TestInteractiveDischarger(c *gc.C) {
 	d := bakerytest.NewDischarger(nil)
 	defer d.Close()
-	d.Checker = func(ctx context.Context, req *http.Request, cav *bakery.ThirdPartyCaveatInfo, interactionKind string) ([]checkers.Caveat, error) {
-		if interactionKind == "" {
-			// Initial discharge: return an interaction-required error.
-			return nil, d.NewInteractionRequiredError(cav, req)
-		}
-		if string(cav.Condition) != "something" {
-			return nil, errgo.Newf("wrong condition")
-		}
-		return []checkers.Caveat{{
-			Condition: "test pass",
-		}}, nil
-	}
-	d.AddInteractor(bakerytest.NewVisitWaitHandler(d))
+	d.Checker = httpbakery.ThirdPartyCaveatCheckerFunc(func(ctx context.Context, req *http.Request, cav *bakery.ThirdPartyCaveatInfo) ([]checkers.Caveat, error) {
+		return nil, d.NewInteractionRequiredError(cav, req)
+	})
+	d.AddInteractor(bakerytest.NewVisitWaitHandler(
+		d,
+		httpbakery.ThirdPartyCaveatCheckerFunc(
+			func(ctx context.Context, req *http.Request, cav *bakery.ThirdPartyCaveatInfo) ([]checkers.Caveat, error) {
+				if string(cav.Condition) != "something" {
+					return nil, errgo.Newf("wrong condition")
+				}
+				return []checkers.Caveat{{
+					Condition: "test pass",
+				}}, nil
+			},
+		),
+	))
 
 	var r recordingChecker
 	b := bakery.New(bakery.BakeryParams{
@@ -177,13 +179,7 @@ func (s *suite) TestInteractiveDischarger(c *gc.C) {
 
 	c.Assert(err, gc.IsNil)
 	client := httpbakery.NewClient()
-	client.AddInteractor(legacyInteractor{
-		kind: httpbakery.WebBrowserWindowInteractor.Kind(),
-		legacyInteract: func(ctx context.Context, client *httpbakery.Client, visitURL *url.URL) error {
-			var c httprequest.Client
-			return c.Get(testContext, visitURL.String(), nil)
-		},
-	})
+	client.AddInteractor(newTestInteractor())
 	ms, err := client.DischargeAll(context.Background(), m)
 	c.Assert(err, gc.IsNil)
 	c.Assert(ms, gc.HasLen, 2)
@@ -332,49 +328,18 @@ func mustGenerateKey() *bakery.KeyPair {
 	return key
 }
 
-type interactor struct {
-	kind     string
-	interact func(ctx context.Context, client *httpbakery.Client, location string, interactionRequiredErr *httpbakery.Error) (*bakery.Macaroon, error)
-}
-
-func (i interactor) Kind() string {
-	return i.kind
-}
-
-func (i interactor) Interact(ctx context.Context, client *httpbakery.Client, location string, interactionRequiredErr *httpbakery.Error) (*bakery.Macaroon, error) {
-	return i.interact(ctx, client, location, interactionRequiredErr)
-}
-
-// testInteractor implements bakery.Interactor by calling itself
-// to return to obtain the macaroon to return from the Interact
-// method.
-type testInteractor func() *bakery.Macaroon
-
-func (f testInteractor) Kind() string {
-	return "test"
-}
-
-func (f testInteractor) Interact(ctx context.Context, client *httpbakery.Client, location string, irErr *httpbakery.Error) (*bakery.Macaroon, error) {
-	return f(), nil
-}
-
-type legacyInteractor struct {
-	kind           string
-	interact       func(ctx context.Context, client *httpbakery.Client, location string, interactionRequiredErr *httpbakery.Error) (*bakery.Macaroon, error)
-	legacyInteract func(ctx context.Context, client *httpbakery.Client, visitURL *url.URL) error
-}
-
-func (i legacyInteractor) Kind() string {
-	return i.kind
-}
-
-func (i legacyInteractor) Interact(ctx context.Context, client *httpbakery.Client, location string, interactionRequiredErr *httpbakery.Error) (*bakery.Macaroon, error) {
-	if i.interact == nil {
-		return nil, errgo.Newf("non-legacy interaction not supported")
+func newTestInteractor() httpbakery.WebBrowserInteractor {
+	return httpbakery.WebBrowserInteractor{
+		OpenWebBrowser: func(u *url.URL) error {
+			resp, err := http.Get(u.String())
+			if err != nil {
+				return errgo.Mask(err)
+			}
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				return errgo.Newf("unexpected status %q", resp.Status)
+			}
+			return nil
+		},
 	}
-	return i.interact(ctx, client, location, interactionRequiredErr)
-}
-
-func (i legacyInteractor) LegacyInteract(ctx context.Context, client *httpbakery.Client, visitURL *url.URL) error {
-	return i.legacyInteract(ctx, client, visitURL)
 }

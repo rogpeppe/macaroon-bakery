@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/juju/httprequest"
+	"github.com/julienschmidt/httprouter"
 	"golang.org/x/net/context"
 	"gopkg.in/errgo.v1"
 
@@ -19,65 +20,45 @@ import (
 	"gopkg.in/macaroon-bakery.v2-unstable/httpbakery"
 )
 
-// Checker is used to check third party caveats.
-// It's the same as httpbakery.ThirdPartyCaveatCheckerFunc
-// except for the extra interactionKind argument which
-// can be used to determine what kind of result
-// to return. For the initial discharge request, interactionKind
-// will be empty.
-type Checker func(ctx context.Context, req *http.Request, cav *bakery.ThirdPartyCaveatInfo, interactionKind string) ([]checkers.Caveat, error)
-
 type Discharger struct {
+	server *httptest.Server
+
+	Mux     *httprouter.Router
 	Key     *bakery.KeyPair
 	Locator bakery.ThirdPartyLocator
+
 	// Checker is called to check third party caveats
 	// when they're discharged. If it's nil, caveats
 	// will be discharged unconditionally.
-	Checker Checker
+	Checker httpbakery.ThirdPartyCaveatChecker
 
-	server      *httptest.Server
 	interactors []InteractionHandler
 
-	mu      sync.Mutex
-	id      int
-	waiting map[string]discharge
+	mu         sync.Mutex
+	maxId      int
+	discharges map[string]*bakery.ThirdPartyCaveatInfo
 }
 
-func NewDischarger(
-	locator bakery.ThirdPartyLocator,
-) *Discharger {
-	mux := http.NewServeMux()
-	server := httptest.NewTLSServer(mux)
+func NewDischarger(locator bakery.ThirdPartyLocator) *Discharger {
 	key, err := bakery.GenerateKey()
 	if err != nil {
 		panic(err)
 	}
 	d := &Discharger{
-		Key:     key,
-		Locator: locator,
-		server:  server,
-		waiting: make(map[string]discharge),
+		Mux:        httprouter.New(),
+		Key:        key,
+		Locator:    locator,
+		discharges: make(map[string]*bakery.ThirdPartyCaveatInfo),
 	}
+	d.server = httptest.NewTLSServer(d.Mux)
 	bd := httpbakery.NewDischarger(httpbakery.DischargerParams{
 		Key:     key,
 		Locator: locator,
 		Checker: d,
 	})
-	bd.AddMuxHandlers(mux, "/")
+	addHandlers(d.Mux, bd.Handlers())
 	startSkipVerify()
 	return d
-}
-
-// ConditionParser adapts the given function into a Checker.
-// It parses the caveat's condition and calls the function with the result.
-func ConditionParser(check func(cond, arg string) ([]checkers.Caveat, error)) Checker {
-	return func(ctx context.Context, req *http.Request, cav *bakery.ThirdPartyCaveatInfo, kind string) ([]checkers.Caveat, error) {
-		cond, arg, err := checkers.ParseCaveat(string(cav.Condition))
-		if err != nil {
-			return nil, err
-		}
-		return check(cond, arg)
-	}
 }
 
 // Close shuts down the server. It may be called more than
@@ -107,6 +88,255 @@ func (d *Discharger) ThirdPartyInfo(ctx context.Context, loc string) (bakery.Thi
 		}, nil
 	}
 	return bakery.ThirdPartyInfo{}, bakery.ErrNotFound
+}
+
+// AddInteractor adds the given interaction handler to the discharger.
+// When NewInteractionRequiredError is called, the AddInteraction
+// method will be used to add interaction information to the
+// error.
+func (d *Discharger) AddInteractor(i InteractionHandler) {
+	addHandlers(d.Mux, i.Handlers())
+	d.interactors = append(d.interactors, i)
+}
+
+// NewInteractionRequiredError returns an error suitable for returning
+// from a third-party caveat checker that requires some interaction from
+// the client. The given caveat provides information about the caveat
+// that's being discharged. The returned error will include information
+// from all the InteractionHandler instances added with d.AddInteractor.
+func (d *Discharger) NewInteractionRequiredError(cav *bakery.ThirdPartyCaveatInfo, req *http.Request) *httpbakery.Error {
+	d.mu.Lock()
+	dischargeId := fmt.Sprintf("%d", d.maxId)
+	d.maxId++
+	d.discharges[dischargeId] = cav
+	d.mu.Unlock()
+
+	err := httpbakery.NewInteractionRequiredError(nil, req)
+	for _, i := range d.interactors {
+		i.SetInteraction(err, dischargeId)
+	}
+	return err
+}
+
+// CompleteDischarge completes the discharge with the
+// given id by creating a discharge macaroon.
+// If uses the given checker to check the caveat. If
+// checker is nil, the caveat will be discharged unconditionally.
+func (d *Discharger) CompleteDischarge(
+	ctx context.Context,
+	dischargeId string,
+	checker bakery.ThirdPartyCaveatChecker,
+) (*bakery.Macaroon, error) {
+	if checker == nil {
+		checker = bakery.ThirdPartyCaveatCheckerFunc(func(ctx context.Context, cav *bakery.ThirdPartyCaveatInfo) ([]checkers.Caveat, error) {
+			return nil, nil
+		})
+	}
+	cav := d.DischargeInfo(dischargeId)
+	return bakery.Discharge(ctx, bakery.DischargeParams{
+		Id:      cav.Id,
+		Caveat:  cav.Caveat,
+		Key:     d.Key,
+		Checker: checker,
+		Locator: d.Locator,
+	})
+}
+
+type InteractionHandler interface {
+	// SetInteraction adds information to the given error
+	// that will tell the client how to interact with the given
+	// discharge id.
+	SetInteraction(err *httpbakery.Error, dischargeId string)
+
+	// Handlers returns any additional HTTP handlers required by
+	// the interaction.
+	Handlers() []httprequest.Handler
+}
+
+// CheckThirdPartyCaveat implements httpbakery.ThirdPartyCaveatChecker.
+// If d.AddInteractor has been called, it will always return
+// an interaction-required error; otherwise if d.Checker
+// is non-nil, it will call that; otherwise it will
+// discharge the caveat unconditionally.
+func (d *Discharger) CheckThirdPartyCaveat(ctx context.Context, req *http.Request, cav *bakery.ThirdPartyCaveatInfo) ([]checkers.Caveat, error) {
+	if d.Checker == nil {
+		return nil, nil
+	}
+	caveats, err := d.Checker.CheckThirdPartyCaveat(ctx, req, cav)
+	if err != nil {
+		return nil, errgo.Mask(err, errgo.Any)
+	}
+	return caveats, nil
+}
+
+// DischargeInfo returns the information associated with
+// the given discharge id. It panics if the discharge id isn't
+// found.
+func (d *Discharger) DischargeInfo(dischargeId string) *bakery.ThirdPartyCaveatInfo {
+	d.mu.Lock()
+	cav, ok := d.discharges[dischargeId]
+	d.mu.Unlock()
+	if !ok {
+		panic(errgo.Newf("discharge id %s not found", dischargeId))
+	}
+	return cav
+}
+
+type DischargeCreator interface {
+	Discharge(dischargeId string, req *http.Request, checker httpbakery.ThirdPartyCaveatChecker) (*bakery.Macaroon, error)
+}
+
+// VisitWaitHandler represents an interaction which involves
+// the client doing a GET of a "visit" URL and of a "wait" URL
+// which returns the discharged macaroon.
+type VisitWaitHandler struct {
+	discharger *Discharger
+	checker    httpbakery.ThirdPartyCaveatChecker
+
+	// Visit is called when a GET request is made to the /visit endpoint.
+	// The discharge parameters can be passed to bakery.Discharge
+	// to create the discharge macaroon.
+	//
+	// The returned macaroon is returned as the result of the
+	// /wait endpoint.
+	//
+	// If Visit is nil, the macaroon will be discharged.
+	// using the checker that the discharger was created with.
+	Visit func(w http.ResponseWriter, req *http.Request, dischargeId string) error
+
+	mu      sync.Mutex
+	waiting map[string]*dischargeFuture
+}
+
+type dischargeFuture struct {
+	caveats []checkers.Caveat
+	err     error
+	done    chan struct{}
+}
+
+func NewVisitWaitHandler(d *Discharger, checker httpbakery.ThirdPartyCaveatChecker) *VisitWaitHandler {
+	return &VisitWaitHandler{
+		discharger: d,
+		checker:    checker,
+		waiting:    make(map[string]*dischargeFuture),
+	}
+}
+
+// Handlers implements InteractionHandler.Handlers by returning
+// the /wait and /visit endpoints.
+func (i *VisitWaitHandler) Handlers() []httprequest.Handler {
+	return reqServer.Handlers(func(p httprequest.Params) (*visitWaitHandlers, context.Context, error) {
+		return &visitWaitHandlers{i}, p.Context, nil
+	})
+}
+
+// SetInteraction implements InteractionHandler.SetInteraction.
+func (v *VisitWaitHandler) SetInteraction(err *httpbakery.Error, dischargeId string) {
+	v.waiting[dischargeId] = &dischargeFuture{
+		done: make(chan struct{}),
+	}
+	httpbakery.WebBrowserInteractor{}.SetInteraction(err,
+		"/visit?dischargeid="+dischargeId,
+		"/wait?dischargeid="+dischargeId,
+	)
+}
+
+// FinishInteraction signals to the InteractiveDischarger that a
+// particular interaction is complete and should return a response
+// to the waiter. If err is nil, the discharge will be completed
+// by calling the discharger's Checker function and adding
+// the provided caveats to the discharge macaroon, otherwise
+// an error will be returned.
+func (i *VisitWaitHandler) FinishInteraction(dischargeId string, cavs []checkers.Caveat, err error) error {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	discharge, ok := i.waiting[dischargeId]
+	if !ok {
+		panic(errgo.Newf("invalid discharge id %q", dischargeId))
+	}
+	select {
+	case <-discharge.done:
+		return errgo.Newf("FinishInteraction called twice")
+	default:
+	}
+	discharge.caveats, discharge.err = cavs, err
+	close(discharge.done)
+	return nil
+}
+
+var reqServer = httprequest.Server{
+	ErrorMapper: httpbakery.ErrorToResponse,
+}
+
+type visitWaitHandlers struct {
+	interactor *VisitWaitHandler
+}
+
+type visitRequest struct {
+	httprequest.Route `httprequest:"GET /visit"`
+	DischargeId       string `httprequest:"dischargeid,form"`
+}
+
+func (h *visitWaitHandlers) Visit(p httprequest.Params, r *visitRequest) error {
+	if h.interactor.Visit != nil {
+		err := h.interactor.Visit(p.Response, p.Request, r.DischargeId)
+		return errgo.Mask(err)
+	}
+	if err := h.interactor.FinishInteraction(r.DischargeId, nil, nil); err != nil {
+		return errgo.Mask(err)
+	}
+	return nil
+}
+
+type waitRequest struct {
+	httprequest.Route `httprequest:"GET /wait"`
+	DischargeId       string `httprequest:"dischargeid,form"`
+}
+
+func (h *visitWaitHandlers) Wait(p httprequest.Params, r *waitRequest) (*httpbakery.WaitResponse, error) {
+	d := h.interactor.discharger
+	d.mu.Lock()
+	discharge, ok := h.interactor.waiting[r.DischargeId]
+	d.mu.Unlock()
+	if !ok {
+		return nil, errgo.Newf("invalid wait id %q", r.DischargeId)
+	}
+	select {
+	case <-discharge.done:
+	case <-time.After(5 * time.Second):
+		return nil, errgo.New("timeout waiting for interaction to complete")
+	}
+	// Wrap h.interactor.checker to add the caveats provided to FinishInteraction.
+	checker := func(ctx context.Context, cav *bakery.ThirdPartyCaveatInfo) ([]checkers.Caveat, error) {
+		if h.interactor.checker == nil {
+			return discharge.caveats, nil
+		}
+		caveats, err := h.interactor.checker.CheckThirdPartyCaveat(ctx, p.Request, cav)
+		if err != nil {
+			return nil, errgo.Mask(err, errgo.Any)
+		}
+		return append(caveats, discharge.caveats...), nil
+	}
+	m, err := h.interactor.discharger.CompleteDischarge(p.Context, r.DischargeId, bakery.ThirdPartyCaveatCheckerFunc(checker))
+	if err != nil {
+		return nil, errgo.Mask(err, errgo.Any)
+	}
+	return &httpbakery.WaitResponse{
+		Macaroon: m,
+	}, nil
+}
+
+// ConditionParser adapts the given function into an httpbakery.ThirdPartyCaveatChecker.
+// It parses the caveat's condition and calls the function with the result.
+func ConditionParser(check func(cond, arg string) ([]checkers.Caveat, error)) httpbakery.ThirdPartyCaveatChecker {
+	f := func(ctx context.Context, req *http.Request, cav *bakery.ThirdPartyCaveatInfo) ([]checkers.Caveat, error) {
+		cond, arg, err := checkers.ParseCaveat(string(cav.Condition))
+		if err != nil {
+			return nil, err
+		}
+		return check(cond, arg)
+	}
+	return httpbakery.ThirdPartyCaveatCheckerFunc(f)
 }
 
 var skipVerify struct {
@@ -154,216 +384,8 @@ func stopSkipVerify() {
 	transport.TLSClientConfig.InsecureSkipVerify = v.oldSkipVerify
 }
 
-type dischargeResult struct {
-	caveats []checkers.Caveat
-	err     error
-}
-
-type discharge struct {
-	caveatInfo *bakery.ThirdPartyCaveatInfo
-	c          chan dischargeResult
-}
-
-// AddInteractor adds the given interaction handler to the discharger.
-// When NewInteractionRequiredError is called, the AddInteraction
-// method will be used to add interaction information to the
-// error.
-func (d *Discharger) AddInteractor(i InteractionHandler) {
-	d.interactors = append(d.interactors, i)
-}
-
-// NewInteractionRequiredError returns an error suitable for returning
-// from a third-party caveat checker that requires some interaction from
-// the client. The given caveat provides information about the caveat
-// that's being discharged. The returned error will include information
-// from all the InteractionHandler instances added with d.AddInteractor.
-func (d *Discharger) NewInteractionRequiredError(cav *bakery.ThirdPartyCaveatInfo, req *http.Request) *httpbakery.Error {
-	d.mu.Lock()
-	dischargeId := fmt.Sprintf("%d", d.id)
-	d.id++
-	d.waiting[dischargeId] = discharge{
-		caveatInfo: cav,
-		c:          make(chan dischargeResult, 1),
-	}
-	d.mu.Unlock()
-
-	err := httpbakery.NewInteractionRequiredError(nil, req)
-	for _, i := range d.interactors {
-		i.SetInteraction(err, dischargeId)
-	}
-	return err
-}
-
-type InteractionHandler interface {
-	// SetInteraction adds information to the given error
-	// that will tell the client how to interact with the given
-	// discharge id.
-	SetInteraction(err *httpbakery.Error, dischargeId string)
-
-	// Handlers returns any additional HTTP handlers required by
-	// the interaction.
-	Handlers() []httprequest.Handler
-}
-
-// CheckThirdPartyCaveat implements httpbakery.ThirdPartyCaveatChecker.
-// If d.AddInteractor has been called, it will always return
-// an interaction-required error; otherwise if d.Checker
-// is non-nil, it will call that; otherwise it will
-// discharge the caveat unconditionally.
-func (d *Discharger) CheckThirdPartyCaveat(ctx context.Context, req *http.Request, cav *bakery.ThirdPartyCaveatInfo) ([]checkers.Caveat, error) {
-	if d.Checker == nil {
-		return nil, nil
-	}
-	return d.Checker(ctx, req, cav, "")
-}
-
-// DischargeParams returns the discharge parameters for the
-// given discharge id, suitable for passing to bakery.Discharge.
-// The Checker field will unconditionally discharge any caveat.
-//
-// DischargeParams panics if the discharge id is not found.
-func (d *Discharger) DischargeParams(dischargeId string, req *http.Request, interactionKind string) bakery.DischargeParams {
-	d.mu.Lock()
-	discharge, ok := d.waiting[dischargeId]
-	d.mu.Unlock()
-	if !ok {
-		panic(errgo.Newf("discharge id %s not found", dischargeId))
-	}
-	return bakery.DischargeParams{
-		Id:     discharge.caveatInfo.Id,
-		Caveat: discharge.caveatInfo.Caveat,
-		Key:    d.Key,
-		Checker: bakery.ThirdPartyCaveatCheckerFunc(func(ctx context.Context, cav *bakery.ThirdPartyCaveatInfo) ([]checkers.Caveat, error) {
-			if d.Checker == nil {
-				return nil, nil
-			}
-			return d.Checker(ctx, req, cav, interactionKind)
-		}),
-		Locator: d.Locator,
-	}
-}
-
-func NewVisitWaitHandler(d *Discharger) *VisitWaitHandler {
-	return &VisitWaitHandler{
-		discharger: d,
-	}
-}
-
-// VisitWaitHandler represents an interaction which involves
-// the client doing a GET of a "visit" URL and of a "wait" URL
-// which returns the discharged macaroon.
-type VisitWaitHandler struct {
-	discharger *Discharger
-
-	// Visit is called when a GET request is made to the /visit endpoint.
-	// The discharge parameters can be passed to bakery.Discharge
-	// to create the discharge macaroon.
-	//
-	// The returned macaroon is returned as the result of the
-	// /wait endpoint.
-	//
-	// If Visit is nil, the macaroon will be discharged.
-	// using the checker that the discharger was created with.
-	Visit func(w http.ResponseWriter, req *http.Request, dischargeId string) error
-}
-
-// Handlers implements InteractionHandler.Handlers by returning
-// the /wait and /visit endpoints.
-func (i *VisitWaitHandler) Handlers() []httprequest.Handler {
-	return reqServer.Handlers(func(p httprequest.Params) (*visitWaitHandlers, context.Context, error) {
-		return &visitWaitHandlers{i}, p.Context, nil
-	})
-}
-
-// SetInteraction implements InteractionHandler.SetInteraction.
-func (v *VisitWaitHandler) SetInteraction(err *httpbakery.Error, dischargeId string) {
-	httpbakery.WebBrowserWindowInteractor.SetInteraction(err,
-		"/visit?dischargeid="+dischargeId,
-		"/wait?dischargeid="+dischargeId,
-	)
-}
-
-// FinishInteraction signals to the InteractiveDischarger that a
-// particular interaction is complete and should return a response
-// to the waiter. If err is nil, the discharge will be completed
-// by calling the discharger's Checker function and adding
-// the provided caveats to the discharge macaroon, otherwise
-// an error will be returned.
-func (i *VisitWaitHandler) FinishInteraction(dischargeId string, cavs []checkers.Caveat, err error) error {
-	i.discharger.mu.Lock()
-	discharge, ok := i.discharger.waiting[dischargeId]
-	i.discharger.mu.Unlock()
-	if !ok {
-		return errgo.Newf("invalid wait id %q", dischargeId)
-	}
-	select {
-	case discharge.c <- dischargeResult{caveats: cavs, err: err}:
-	default:
-		return errgo.Newf("cannot finish interaction %q", dischargeId)
-	}
-	return nil
-}
-
-var reqServer = httprequest.Server{
-	ErrorMapper: httpbakery.ErrorToResponse,
-}
-
-type visitWaitHandlers struct {
-	interactor *VisitWaitHandler
-}
-
-type visitRequest struct {
-	httprequest.Route `httprequest:"GET /visit"`
-	DischargeId       string `httprequest:"dischargeid,form"`
-}
-
-func (h *visitWaitHandlers) Visit(p httprequest.Params, r visitRequest) error {
-	if h.interactor.Visit != nil {
-		err := h.interactor.Visit(p.Response, p.Request, r.DischargeId)
-		return errgo.Mask(err)
-	}
-	if err := h.interactor.FinishInteraction(r.DischargeId, nil, nil); err != nil {
-		return errgo.Mask(err)
-	}
-	return nil
-}
-
-type waitRequest struct {
-	httprequest.Route `httprequest:"GET /wait"`
-	DischargeId       string `httprequest:"dischargeid,form"`
-}
-
-func (h *visitWaitHandlers) Wait(p httprequest.Params, r waitRequest) (*httpbakery.WaitResponse, error) {
-	d := h.interactor.discharger
-	d.mu.Lock()
-	discharge, ok := d.waiting[r.DischargeId]
-	d.mu.Unlock()
-	if !ok {
-		return nil, errgo.Newf("invalid wait id %q", r.DischargeId)
-	}
-	select {
-	case res := <-discharge.c:
-		if res.err != nil {
-			return nil, errgo.Mask(res.err, errgo.Any)
-		}
-		dp := h.interactor.discharger.DischargeParams(
-			r.DischargeId,
-			p.Request,
-			httpbakery.WebBrowserWindowInteractor.Kind(),
-		)
-		m, err := bakery.Discharge(p.Context, dp)
-		if err != nil {
-			return nil, errgo.Mask(err, errgo.Any)
-		}
-		// Add any caveats that were passed to FinishInteraction.
-		err = m.AddCaveats(p.Context, res.caveats, h.interactor.discharger.Key, h.interactor.discharger)
-		if err != nil {
-			return nil, errgo.Mask(err)
-		}
-		return &httpbakery.WaitResponse{
-			Macaroon: m,
-		}, nil
-	case <-time.After(5 * time.Second):
-		return nil, errgo.New("timeout waiting for interaction to complete")
+func addHandlers(mux *httprouter.Router, hs []httprequest.Handler) {
+	for _, h := range hs {
+		mux.Handle(h.Method, h.Path, h.Handle)
 	}
 }

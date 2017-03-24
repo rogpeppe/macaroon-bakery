@@ -31,12 +31,12 @@ func OpenWebBrowser(url *url.URL) error {
 	return err
 }
 
-type WebBrowserInteractor struct{}
-
-// WebBrowserInteractor represents an interaction method
-// that requires the user to open a web browser window
-// to authenticate. It implements Interactor.
-var WebBrowserWindowInteractor WebBrowserInteractor
+type WebBrowserInteractor struct {
+	// OpenWebBrowser is used to visit a page in
+	// the user's web browser. If it's nil, the
+	// OpenWebBrowser function will be used.
+	OpenWebBrowser func(*url.URL) error
+}
 
 func (WebBrowserInteractor) Kind() string {
 	return BrowserWindowInteractionKind
@@ -76,7 +76,11 @@ func (wi WebBrowserInteractor) Interact(ctx context.Context, client *Client, loc
 	if err != nil {
 		return nil, errgo.Notef(err, "cannot make relative wait URL")
 	}
-	if err := OpenWebBrowser(visitURL); err != nil {
+	open := wi.OpenWebBrowser
+	if open == nil {
+		open = OpenWebBrowser
+	}
+	if err := open(visitURL); err != nil {
 		return nil, errgo.Mask(err)
 	}
 	return waitForMacaroon(ctx, client, waitURL)
