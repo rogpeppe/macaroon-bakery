@@ -76,6 +76,7 @@ func SetUpAuth(client *httpbakery.Client, siteURL string, agentUsername string) 
 	}); err != nil {
 		return errgo.Mask(err)
 	}
+	
 	client.WebPageVisitor = &v
 	return nil
 }
@@ -102,12 +103,50 @@ type Agent struct {
 	Key *bakery.KeyPair `json:"key,omitempty" yaml:"key,omitempty"`
 }
 
-// Visitor is a httpbakery.Visitor that performs interaction using the
+// interactionParms holds the information expected in
+// the agent interaction entry in an interaction-required
+// error.
+type interactionParams struct {
+
+there are a couple of possibilities here. We could use the existing
+visit/wait approach, and put the visit URL in here.
+
+a slightly more direct/efficient alternative would be
+to to include the discharge macaroon directly in
+the interactionParams struct:
+
+	// Macaroon holds the discharge macaroon
+	// with with a self-addressed
+	// third party caveat that can be discharged to
+	// discharge the original third party caveat.
+	Macaroon *bakery.Macaroon
+
+this approach has the advantage that the original
+third party caveat will be discharged in only one
+round trip.
+
+The macaroon would be included only when the original
+request mentions the agent user name and public key
+(meaning that they would need to be set as cookies
+when the interactor is added to the agent)
+} 
+
+// Interactor is a httpbakery.Interactor that performs interaction using the
 // agent login protocol. A Visitor may be encoded as JSON or YAML
 // so that agent information can be stored persistently.
-type Visitor struct {
+type Interactor struct {
 	defaultKey *bakery.KeyPair
 	agents     map[string][]agent
+}
+
+func (i *Interactor) Kind() string {
+	return "agent"
+}
+
+func (i *Interactor) Interact(ctx context.Context, client *Client, location string, interactionRequiredErr *Error) (*bakery.Macaroon, error) {
+}
+
+func (i *Interactor) LegacyInteract(ctx context.Context, client *Client, visitURL *url.URL) error {
 }
 
 // Agents returns all the agents registered with the visitor

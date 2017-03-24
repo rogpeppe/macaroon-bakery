@@ -9,6 +9,7 @@ import (
 
 	"golang.org/x/net/context"
 	gc "gopkg.in/check.v1"
+	"github.com/julienschmidt/httprouter"
 	"gopkg.in/errgo.v1"
 
 	"gopkg.in/macaroon-bakery.v2-unstable/bakery"
@@ -192,120 +193,95 @@ func (s *suite) TestInteractiveDischarger(c *gc.C) {
 	c.Assert(r.caveats[1], gc.Equals, "test pass")
 }
 
-//func (s *suite) TestInteractiveDischarger(c *gc.C) {
-//	var d *bakerytest.InteractiveDischarger
-//	d = bakerytest.NewInteractiveDischarger(nil, http.HandlerFunc(
-//		func(w http.ResponseWriter, r *http.Request) {
-//			d.FinishInteraction(context.TODO(), w, r, []checkers.Caveat{
-//				checkers.Caveat{
-//					Condition: "test pass",
-//				},
-//			}, nil)
-//		},
-//	))
-//	defer d.Close()
-//
-//	var r recordingChecker
-//	b := bakery.New(bakery.BakeryParams{
-//		Location: "here",
-//		Locator:  d,
-//		Checker:  &r,
-//		Key:      mustGenerateKey(),
-//	})
-//	m, err := b.Oven.NewMacaroon(context.Background(), bakery.LatestVersion, ages, []checkers.Caveat{{
-//		Location:  d.Location(),
-//		Condition: "something",
-//	}}, dischargeOp)
-//
-//	c.Assert(err, gc.IsNil)
-//	client := httpbakery.NewClient()
-//	client.AddInteractor(legacyInteractor{
-//		kind: BrowserWindowInteractionKind,
-//		interact: func(ctx context.Context, client *httpbakery.Client, location string, interactionRequiredErr *httpbakery.Error) (*bakery.Macaroon, error) {
-//		},
-//	}
-//	client.VisitWebPage = func(u *url.URL) error {
-//		var c httprequest.Client
-//		return c.Get(testContext, u.String(), nil)
-//	}
-//	ms, err := client.DischargeAll(context.Background(), m)
-//	c.Assert(err, gc.IsNil)
-//	c.Assert(ms, gc.HasLen, 2)
-//
-//	_, err = b.Checker.Auth(ms).Allow(context.Background(), dischargeOp)
-//	c.Assert(err, gc.IsNil)
-//	// First caveat is time-before caveat added by NewMacaroon.
-//	// Second is the one added by the discharger above.
-//	c.Assert(r.caveats, gc.HasLen, 2)
-//	c.Assert(r.caveats[1], gc.Equals, "test pass")
-//}
-//
-//func (s *suite) TestLoginDischargerError(c *gc.C) {
-//	var d *bakerytest.InteractiveDischarger
-//	d = bakerytest.NewInteractiveDischarger(nil, http.HandlerFunc(
-//		func(w http.ResponseWriter, r *http.Request) {
-//			d.FinishInteraction(testContext, w, r, nil, errors.New("test error"))
-//		},
-//	))
-//	defer d.Close()
-//
-//	b := bakery.New(bakery.BakeryParams{
-//		Location: "here",
-//		Locator:  d,
-//		Key:      mustGenerateKey(),
-//	})
-//	m, err := b.Oven.NewMacaroon(context.Background(), bakery.LatestVersion, ages, []checkers.Caveat{{
-//		Location:  d.Location(),
-//		Condition: "something",
-//	}}, dischargeOp)
-//
-//	c.Assert(err, gc.IsNil)
-//	client := httpbakery.NewClient()
-//	client.VisitWebPage = func(u *url.URL) error {
-//		c.Logf("visiting %s", u)
-//		var c httprequest.Client
-//		return c.Get(testContext, u.String(), nil)
-//	}
-//	_, err = client.DischargeAll(context.Background(), m)
-//	c.Assert(err, gc.ErrorMatches, `cannot get discharge from ".*": failed to acquire macaroon after waiting: third party refused discharge: test error`)
-//}
-//
-//func (s *suite) TestInteractiveDischargerURL(c *gc.C) {
-//	var d *bakerytest.InteractiveDischarger
-//	d = bakerytest.NewInteractiveDischarger(nil, http.HandlerFunc(
-//		func(w http.ResponseWriter, r *http.Request) {
-//			http.Redirect(w, r, d.URL("/redirect", r), http.StatusFound)
-//		},
-//	))
-//	defer d.Close()
-//	d.Mux.Handle("/redirect", http.HandlerFunc(
-//		func(w http.ResponseWriter, r *http.Request) {
-//			d.FinishInteraction(testContext, w, r, nil, nil)
-//		},
-//	))
-//	b := bakery.New(bakery.BakeryParams{
-//		Location: "here",
-//		Locator:  d,
-//		Key:      mustGenerateKey(),
-//	})
-//	m, err := b.Oven.NewMacaroon(context.Background(), bakery.LatestVersion, ages, []checkers.Caveat{{
-//		Location:  d.Location(),
-//		Condition: "something",
-//	}}, dischargeOp)
-//
-//	c.Assert(err, gc.IsNil)
-//	client := httpbakery.NewClient()
-//	client.VisitWebPage = func(u *url.URL) error {
-//		var c httprequest.Client
-//		return c.Get(testContext, u.String(), nil)
-//	}
-//	ms, err := client.DischargeAll(context.Background(), m)
-//	c.Assert(err, gc.IsNil)
-//	c.Assert(ms, gc.HasLen, 2)
-//
-//	_, err = b.Checker.Auth(ms).Allow(context.Background(), dischargeOp)
-//	c.Assert(err, gc.IsNil)
-//}
+func (s *suite) TestLoginDischargerError(c *gc.C) {
+	d := bakerytest.NewDischarger(nil)
+	defer d.Close()
+	d.Checker = httpbakery.ThirdPartyCaveatCheckerFunc(func(ctx context.Context, req *http.Request, cav *bakery.ThirdPartyCaveatInfo) ([]checkers.Caveat, error) {
+		return nil, d.NewInteractionRequiredError(cav, req)
+	})
+	d.AddInteractor(bakerytest.NewVisitWaitHandler(
+		d,
+		httpbakery.ThirdPartyCaveatCheckerFunc(
+			func(ctx context.Context, req *http.Request, cav *bakery.ThirdPartyCaveatInfo) ([]checkers.Caveat, error) {
+				return nil, errgo.New("test error")
+			},
+		),
+	))
+
+	b := bakery.New(bakery.BakeryParams{
+		Location: "here",
+		Locator:  d,
+		Key:      mustGenerateKey(),
+	})
+	m, err := b.Oven.NewMacaroon(context.Background(), bakery.LatestVersion, ages, []checkers.Caveat{{
+		Location:  d.Location(),
+		Condition: "something",
+	}}, dischargeOp)
+
+	c.Assert(err, gc.IsNil)
+	client := httpbakery.NewClient()
+	client.AddInteractor(newTestInteractor())
+	_, err = client.DischargeAll(context.Background(), m)
+	c.Assert(err, gc.ErrorMatches, `cannot get discharge from ".*": failed to acquire macaroon after waiting: third party refused discharge: test error`)
+}
+
+func (s *suite) TestInteractiveDischargerFinishInteraction(c *gc.C) {
+	d := bakerytest.NewDischarger(nil)
+	defer d.Close()
+	d.Checker = httpbakery.ThirdPartyCaveatCheckerFunc(func(ctx context.Context, req *http.Request, cav *bakery.ThirdPartyCaveatInfo) ([]checkers.Caveat, error) {
+		return nil, d.NewInteractionRequiredError(cav, req)
+	})
+	interactor := bakerytest.NewVisitWaitHandler(
+		d,
+		httpbakery.ThirdPartyCaveatCheckerFunc(
+			func(ctx context.Context, req *http.Request, cav *bakery.ThirdPartyCaveatInfo) ([]checkers.Caveat, error) {
+				return []checkers.Caveat{{
+					Condition: "condition1",
+				}}, nil
+			},
+		),
+	)
+	d.AddInteractor(interactor)
+	interactor.Visit = func(w http.ResponseWriter, req *http.Request, dischargeId string) error {
+		http.Redirect(w, req,
+			d.Location() + "/redirect?dischargeid=" + dischargeId,
+			http.StatusFound,
+		)
+		return nil
+	}
+	d.Mux.GET("/redirect", func(w http.ResponseWriter, req *http.Request, p httprouter.Params) {
+		req.ParseForm()
+		interactor.FinishInteraction(req.Form.Get("dischargeid"), []checkers.Caveat{{
+			Condition: "condition2",
+		}}, nil)
+	})
+	var r recordingChecker
+	b := bakery.New(bakery.BakeryParams{
+		Location: "here",
+		Locator:  d,
+		Key:      mustGenerateKey(),
+		Checker: &r,
+	})
+	m, err := b.Oven.NewMacaroon(context.Background(), bakery.LatestVersion, ages, []checkers.Caveat{{
+		Location:  d.Location(),
+		Condition: "something",
+	}}, dischargeOp)
+
+	c.Assert(err, gc.IsNil)
+	client := httpbakery.NewClient()
+	client.AddInteractor(newTestInteractor())
+
+	ms, err := client.DischargeAll(context.Background(), m)
+	c.Assert(err, gc.IsNil)
+	c.Assert(ms, gc.HasLen, 2)
+
+	_, err = b.Checker.Auth(ms).Allow(context.Background(), dischargeOp)
+	c.Assert(err, gc.IsNil)
+
+	// Note: the first caveat is the "time-before" caveat
+	// that's always created.
+	c.Assert(r.caveats[1:], gc.DeepEquals, []string{"condition1", "condition2"})
+}
 
 type recordingChecker struct {
 	caveats []string

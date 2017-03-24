@@ -116,7 +116,7 @@ func (s *ClientSuite) TestSingleServiceFirstPartyWithHeader(c *gc.C) {
 }
 
 func (s *ClientSuite) TestRepeatedRequestWithBody(c *gc.C) {
-	d := bakerytest.NewDischarger(nil, nil)
+	d := bakerytest.NewDischarger(nil)
 	defer d.Close()
 
 	// Create a target service.
@@ -153,7 +153,7 @@ func (s ClientSuite) TestWithLargeBody(c *gc.C) {
 	// checker enabled and when go issue #12796
 	// is not fixed.
 
-	d := bakerytest.NewDischarger(nil, nil)
+	d := bakerytest.NewDischarger(nil)
 	defer d.Close()
 
 	// Create a target service.
@@ -223,7 +223,8 @@ func assertDischargeServerDischargesConditionForVersion(c *gc.C, cond string, ve
 		c.Check(string(cav.Condition), gc.Equals, cond)
 		return nil, nil
 	}
-	discharger := bakerytest.NewDischarger(nil, httpbakery.ThirdPartyCaveatCheckerFunc(checker))
+	discharger := bakerytest.NewDischarger(nil)
+	discharger.Checker = httpbakery.ThirdPartyCaveatCheckerFunc(checker)
 
 	bKey, err := bakery.GenerateKey()
 	c.Assert(err, gc.IsNil)
@@ -377,7 +378,8 @@ func (s *ClientSuite) TestTwoDischargesRequired(c *gc.C) {
 		dischargeCount++
 		return nil, nil
 	}
-	discharger := bakerytest.NewDischarger(nil, httpbakery.ThirdPartyCaveatCheckerFunc(checker))
+	discharger := bakerytest.NewDischarger(nil)
+	discharger.Checker = httpbakery.ThirdPartyCaveatCheckerFunc(checker)
 
 	srv := s.serverRequiringMultipleDischarges(httpbakery.MaxDischargeRetries, discharger)
 	defer srv.Close()
@@ -400,7 +402,8 @@ func (s *ClientSuite) TestTooManyDischargesRequired(c *gc.C) {
 	checker := func(ctx context.Context, req *http.Request, cav *bakery.ThirdPartyCaveatInfo) ([]checkers.Caveat, error) {
 		return nil, nil
 	}
-	discharger := bakerytest.NewDischarger(nil, httpbakery.ThirdPartyCaveatCheckerFunc(checker))
+	discharger := bakerytest.NewDischarger(nil)
+	discharger.Checker = httpbakery.ThirdPartyCaveatCheckerFunc(checker)
 
 	srv := s.serverRequiringMultipleDischarges(httpbakery.MaxDischargeRetries+1, discharger)
 	defer srv.Close()
@@ -538,7 +541,7 @@ func (ta *testAcquirer) AcquireDischarge(ctx context.Context, cav macaroon.Cavea
 }
 
 func (s *ClientSuite) TestMacaroonCookieName(c *gc.C) {
-	d := bakerytest.NewDischarger(nil, nil)
+	d := bakerytest.NewDischarger(nil)
 	defer d.Close()
 
 	checked := make(map[string]bool)
@@ -703,9 +706,10 @@ func (s *ClientSuite) TestMacaroonCookiePath(c *gc.C) {
 }
 
 func (s *ClientSuite) TestThirdPartyDischargeRefused(c *gc.C) {
-	d := bakerytest.NewDischarger(nil, bakerytest.ConditionParser(func(cond, arg string) ([]checkers.Caveat, error) {
+	d := bakerytest.NewDischarger(nil)
+	d.Checker = bakerytest.ConditionParser(func(cond, arg string) ([]checkers.Caveat, error) {
 		return nil, errgo.New("boo! cond " + cond)
-	}))
+	})
 	defer d.Close()
 
 	// Create a target service.
@@ -731,7 +735,8 @@ func (s *ClientSuite) TestThirdPartyDischargeRefused(c *gc.C) {
 }
 
 func (s *ClientSuite) TestDischargeWithInteractionRequiredError(c *gc.C) {
-	d := bakerytest.NewDischarger(nil, bakerytest.ConditionParser(func(cond, arg string) ([]checkers.Caveat, error) {
+	d := bakerytest.NewDischarger(nil)
+	d.Checker = bakerytest.ConditionParser(func(cond, arg string) ([]checkers.Caveat, error) {
 		return nil, &httpbakery.Error{
 			Code:    httpbakery.ErrInteractionRequired,
 			Message: "interaction required",
@@ -740,7 +745,7 @@ func (s *ClientSuite) TestDischargeWithInteractionRequiredError(c *gc.C) {
 				WaitURL:  "http://0.1.2.3/",
 			},
 		}
-	}))
+	})
 	defer d.Close()
 
 	// Create a target service.
@@ -775,17 +780,18 @@ func (s *ClientSuite) TestDischargeWithInteractionRequiredError(c *gc.C) {
 	c.Assert(resp, gc.IsNil)
 }
 
-func (s *ClientSuite) TestDischargeWithInteractionRequiredErrorWithMultipleInteractors(c *gc.C) {
-	srv := httptest.NewServer(newVisitHandler(XXXX))
-	d := bakerytest.NewDischarger(nil, bakerytest.ConditionParser(func(cond, arg string) ([]checkers.Caveat, error) {
-		err := &httpbakery.Error{
-			Code:    httpbakery.ErrInteractionRequired,
-			Message: "interaction required",
-		}
-		httpbakery.WebBrowserWindowInteractor.SetInteraction(err, 
-		return nil, 
-	}))
-}
+//
+//func (s *ClientSuite) TestDischargeWithInteractionRequiredErrorWithMultipleInteractors(c *gc.C) {
+//	srv := httptest.NewServer(newVisitHandler(XXXX))
+//	d := bakerytest.NewDischarger(nil, bakerytest.ConditionParser(func(cond, arg string) ([]checkers.Caveat, error) {
+//		err := &httpbakery.Error{
+//			Code:    httpbakery.ErrInteractionRequired,
+//			Message: "interaction required",
+//		}
+//		httpbakery.WebBrowserWindowInteractor.SetInteraction(err,
+//		return nil,
+//	}))
+//}
 
 var dischargeWithVisitURLErrorTests = []struct {
 	about       string
@@ -811,7 +817,8 @@ func (s *ClientSuite) TestDischargeWithVisitURLError(c *gc.C) {
 	visitSrv := httptest.NewServer(visitor)
 	defer visitSrv.Close()
 
-	d := bakerytest.NewDischarger(nil, bakerytest.ConditionParser(func(cond, arg string) ([]checkers.Caveat, error) {
+	d := bakerytest.NewDischarger(nil)
+	d.Checker = bakerytest.ConditionParser(func(cond, arg string) ([]checkers.Caveat, error) {
 		return nil, &httpbakery.Error{
 			Code:    httpbakery.ErrInteractionRequired,
 			Message: "interaction required",
@@ -820,7 +827,7 @@ func (s *ClientSuite) TestDischargeWithVisitURLError(c *gc.C) {
 				WaitURL:  visitSrv.URL + "/wait",
 			},
 		}
-	}))
+	})
 	defer d.Close()
 
 	// Create a target service.
@@ -908,7 +915,7 @@ func (s *ClientSuite) TestMacaroonsForURL(c *gc.C) {
 }
 
 func (s *ClientSuite) TestDoWithCustomError(c *gc.C) {
-	d := bakerytest.NewDischarger(nil, nil)
+	d := bakerytest.NewDischarger(nil)
 	defer d.Close()
 
 	// Create a target service.
@@ -971,7 +978,7 @@ func (s *ClientSuite) TestDoWithCustomError(c *gc.C) {
 }
 
 func (s *ClientSuite) TestHandleError(c *gc.C) {
-	d := bakerytest.NewDischarger(nil, nil)
+	d := bakerytest.NewDischarger(nil)
 	defer d.Close()
 
 	// Create a target service.
@@ -1025,7 +1032,7 @@ func (s *ClientSuite) TestHandleError(c *gc.C) {
 }
 
 func (s *ClientSuite) TestNewClientOldServer(c *gc.C) {
-	d := bakerytest.NewDischarger(nil, nil)
+	d := bakerytest.NewDischarger(nil)
 	defer d.Close()
 
 	// Create a target service.

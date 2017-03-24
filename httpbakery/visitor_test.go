@@ -18,7 +18,7 @@ type InteractorSuite struct {
 	jujutesting.LoggingSuite
 }
 
-var _ = gc.Suite(&VisitorSuite{})
+var _ = gc.Suite(&InteractorSuite{})
 
 func (*InteractorSuite) TestLegacyGetInteractionMethodsGetFailure(c *gc.C) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -62,30 +62,30 @@ func (*InteractorSuite) TestLegacyGetInteractionMethodsInvalidURL(c *gc.C) {
 	c.Assert(err, gc.ErrorMatches, `invalid URL for interaction method "method": parse :::: missing protocol scheme`)
 }
 
-func (*InteractorSuite) Test(c *gc.C) {
-	initialPage := 0
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		w.Header().Set("Content-Type", "text/html")
-		initialPage++
-		fmt.Fprint(w, `<html>oh yes</html>`)
-	}))
-	defer srv.Close()
-	methods := map[string]*url.URL{
-		httpbakery.UserInteractionMethod: mustParseURL(srv.URL),
-	}
-	visited := 0
-	v := httpbakery.NewMultiVisitor(
-		visitorFunc(func(_ *httpbakery.Client, m map[string]*url.URL) error {
-			c.Check(m, jc.DeepEquals, methods)
-			visited++
-			return nil
-		}),
-	)
-	err := v.VisitWebPage(testContext, httpbakery.NewClient(), methods)
-	c.Assert(err, gc.IsNil)
-	c.Assert(initialPage, gc.Equals, 1)
-	c.Assert(visited, gc.Equals, 1)
-}
+//func (*InteractorSuite) TestMultiVisitorNoInteractionMethods(c *gc.C) {
+//	initialPage := 0
+//	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+//		w.Header().Set("Content-Type", "text/html")
+//		initialPage++
+//		fmt.Fprint(w, `<html>oh yes</html>`)
+//	}))
+//	defer srv.Close()
+//	methods := map[string]*url.URL{
+//		httpbakery.UserInteractionMethod: mustParseURL(srv.URL),
+//	}
+//	visited := 0
+//	v := httpbakery.NewMultiVisitor(
+//		visitorFunc(func(_ *httpbakery.Client, m map[string]*url.URL) error {
+//			c.Check(m, jc.DeepEquals, methods)
+//			visited++
+//			return nil
+//		}),
+//	)
+//	err := v.VisitWebPage(testContext, httpbakery.NewClient(), methods)
+//	c.Assert(err, gc.IsNil)
+//	c.Assert(initialPage, gc.Equals, 1)
+//	c.Assert(visited, gc.Equals, 1)
+//}
 
 //func (*VisitorSuite) TestMultiVisitorNoInteractionMethods(c *gc.C) {
 //	initialPage := 0

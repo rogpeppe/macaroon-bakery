@@ -79,7 +79,7 @@ func (s *ErrorSuite) TestNewInteractionRequiredError(c *gc.C) {
 	req, err := http.NewRequest("GET", "/", nil)
 	c.Assert(err, gc.IsNil)
 
-	err = httpbakery.NewInteractionRequiredError("/visit", "/wait", nil, req)
+	err = httpbakery.NewInteractionRequiredError(nil, req)
 	code, resp := httpbakery.ErrorToResponse(testContext, err)
 	c.Assert(code, gc.Equals, http.StatusProxyAuthRequired)
 
@@ -89,17 +89,13 @@ func (s *ErrorSuite) TestNewInteractionRequiredError(c *gc.C) {
 	c.Assert(string(data), jc.JSONEquals, &httpbakery.Error{
 		Code:    httpbakery.ErrInteractionRequired,
 		Message: httpbakery.ErrInteractionRequired.Error(),
-		Info: &httpbakery.ErrorInfo{
-			VisitURL: "/visit",
-			WaitURL:  "/wait",
-		},
 	})
 
 	// With a request with a version 1 header, the response
 	// should be 401.
 	req.Header.Set("Bakery-Protocol-Version", "1")
 
-	err = httpbakery.NewInteractionRequiredError("/visit", "/wait", nil, req)
+	err = httpbakery.NewInteractionRequiredError(nil, req)
 	code, resp = httpbakery.ErrorToResponse(testContext, err)
 	c.Assert(code, gc.Equals, http.StatusUnauthorized)
 
@@ -113,17 +109,13 @@ func (s *ErrorSuite) TestNewInteractionRequiredError(c *gc.C) {
 	c.Assert(string(data), jc.JSONEquals, &httpbakery.Error{
 		Code:    httpbakery.ErrInteractionRequired,
 		Message: httpbakery.ErrInteractionRequired.Error(),
-		Info: &httpbakery.ErrorInfo{
-			VisitURL: "/visit",
-			WaitURL:  "/wait",
-		},
 	})
 
 	// With a request with a later version header, the response
 	// should be also be 401.
 	req.Header.Set("Bakery-Protocol-Version", "2")
 
-	err = httpbakery.NewInteractionRequiredError("/visit", "/wait", nil, req)
+	err = httpbakery.NewInteractionRequiredError(nil, req)
 	code, resp = httpbakery.ErrorToResponse(testContext, err)
 	c.Assert(code, gc.Equals, http.StatusUnauthorized)
 
@@ -137,9 +129,5 @@ func (s *ErrorSuite) TestNewInteractionRequiredError(c *gc.C) {
 	c.Assert(string(data), jc.JSONEquals, &httpbakery.Error{
 		Code:    httpbakery.ErrInteractionRequired,
 		Message: httpbakery.ErrInteractionRequired.Error(),
-		Info: &httpbakery.ErrorInfo{
-			VisitURL: "/visit",
-			WaitURL:  "/wait",
-		},
 	})
 }
