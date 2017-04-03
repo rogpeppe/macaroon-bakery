@@ -512,7 +512,7 @@ func (s *agentSuite) defaultHandle(ctx context.Context, w http.ResponseWriter, r
 			checkers.DeclaredCaveat("username", username),
 		}
 		s.discharger.FinishInteraction(ctx, w, req, cavs, nil)
-		httprequest.WriteJSON(w, http.StatusOK, agent.AgentResponse{
+		httprequest.WriteJSON(w, http.StatusOK, agent.LegacyAgentResponse{
 			AgentLogin: true,
 		})
 		return

@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
+	"net/url"
 
 	"gopkg.in/errgo.v1"
 
@@ -19,8 +20,8 @@ type agentLogin struct {
 }
 
 // setCookie sets an agent-login cookie with the specified parameters on
-// the given request.
-func setCookie(req *http.Request, username string, key *bakery.PublicKey) {
+// the given cookie jar.
+func setCookie(jar http.CookieJar, u *url.URL, username string, key *bakery.PublicKey) {
 	al := agentLogin{
 		Username:  username,
 		PublicKey: key,
@@ -32,10 +33,10 @@ func setCookie(req *http.Request, username string, key *bakery.PublicKey) {
 		// isn't.
 		panic(errgo.Notef(err, "cannot marshal %s cookie", cookieName))
 	}
-	req.AddCookie(&http.Cookie{
+	jar.SetCookies(u, []*http.Cookie{{
 		Name:  cookieName,
 		Value: base64.StdEncoding.EncodeToString(data),
-	})
+	}})
 }
 
 // ErrNoAgentLoginCookie is the error returned when the expected
