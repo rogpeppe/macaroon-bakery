@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sync"
+	"log"
 	"time"
 
 	"github.com/juju/httprequest"
@@ -113,7 +114,7 @@ func (d *Discharger) NewInteractionRequiredError(cav *bakery.ThirdPartyCaveatInf
 
 	err := httpbakery.NewInteractionRequiredError(nil, req)
 	for _, i := range d.interactors {
-		i.SetInteraction(err, dischargeId)
+		i.SetInteraction(err, req, dischargeId)
 	}
 	return err
 }
@@ -146,7 +147,9 @@ type InteractionHandler interface {
 	// SetInteraction adds information to the given error
 	// that will tell the client how to interact with the given
 	// discharge id.
-	SetInteraction(err *httpbakery.Error, dischargeId string)
+	// The request is the request that the interaction
+	// error is being returned in response to.
+	SetInteraction(err *httpbakery.Error, req *http.Request, dischargeId string)
 
 	// Handlers returns any additional HTTP handlers required by
 	// the interaction.
@@ -214,6 +217,12 @@ type dischargeFuture struct {
 	done    chan struct{}
 }
 
+// NewVisitWaitHandler returns a new VisitWaitHandler that
+// processes visit/wait-style interactions using the given
+// discharger, and that uses checker to check third party
+// caveats that use it.
+//
+// Once created, it can be added to the discharger with AddInteractor.
 func NewVisitWaitHandler(d *Discharger, checker httpbakery.ThirdPartyCaveatChecker) *VisitWaitHandler {
 	return &VisitWaitHandler{
 		discharger: d,
@@ -231,7 +240,7 @@ func (i *VisitWaitHandler) Handlers() []httprequest.Handler {
 }
 
 // SetInteraction implements InteractionHandler.SetInteraction.
-func (v *VisitWaitHandler) SetInteraction(err *httpbakery.Error, dischargeId string) {
+func (v *VisitWaitHandler) SetInteraction(err *httpbakery.Error, _ *http.Request, dischargeId string) {
 	v.waiting[dischargeId] = &dischargeFuture{
 		done: make(chan struct{}),
 	}
@@ -278,9 +287,10 @@ type visitRequest struct {
 }
 
 func (h *visitWaitHandlers) Visit(p httprequest.Params, r *visitRequest) error {
+	log.Printf("visitWaitHandlers.Visit, visit func %p", h.interactor.Visit)
 	if h.interactor.Visit != nil {
 		err := h.interactor.Visit(p.Response, p.Request, r.DischargeId)
-		return errgo.Mask(err)
+		return errgo.Mask(err, errgo.Any)
 	}
 	if err := h.interactor.FinishInteraction(r.DischargeId, nil, nil); err != nil {
 		return errgo.Mask(err)

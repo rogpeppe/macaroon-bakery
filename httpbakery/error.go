@@ -87,7 +87,7 @@ type ErrorInfo struct {
 	// third party supports for completing the discharge.
 	// See InteractionMethod for a more convenient
 	// accessor method.
-	InteractionMethods map[string]*json.RawMessage
+	InteractionMethods map[string]*json.RawMessage `json:",omitempty"`
 
 	// VisitURL holds a URL that the client should visit
 	// in a web browser to authenticate themselves.

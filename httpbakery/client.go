@@ -531,15 +531,7 @@ func (c *Client) legacyInteract(ctx context.Context, location string, irErr *Err
 	if len(c.InteractionMethods) > 1 || c.InteractionMethods[0].Kind() != BrowserWindowInteractionKind {
 		// We have several possible methods or we only support a non-window
 		// method, so we need to fetch the possible methods supported by the discharger.
-		methodURLs1, err := legacyGetInteractionMethods(ctx, c, visitURL)
-		if err != nil {
-			// When a discharger doesn't support retrieving interaction methods,
-			// we expect to get an error, because it's probably returning an HTML
-			// page not JSON.
-			logger.Infof("ignoring error: cannot get interaction methods: %v", err)
-		} else {
-			methodURLs = methodURLs1
-		}
+		methodURLs = legacyGetInteractionMethods(ctx, c, visitURL)
 	}
 	logger.Infof("methodURLs %v", methodURLs)
 	for _, interactor := range c.InteractionMethods {
@@ -563,6 +555,7 @@ func (c *Client) legacyInteract(ctx context.Context, location string, irErr *Err
 			return nil, errgo.Mask(err)
 		}
 		if err := interactor.LegacyInteract(ctx, c, visitURL); err != nil {
+			logger.Infof("%T.LegacyInteract failed: %#v", interactor, err)
 			return nil, &InteractionError{
 				Reason: errgo.Mask(err, errgo.Any),
 			}

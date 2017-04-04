@@ -8,6 +8,7 @@ package agent
 
 import (
 	"errors"
+	"log"
 	"net/url"
 
 	"github.com/juju/httprequest"
@@ -20,6 +21,24 @@ import (
 )
 
 var logger = loggo.GetLogger("httpbakery.agent")
+
+// AuthInfo holds the serialized form of a Visitor - it is
+// used by the JSON and YAML marshal and unmarshal
+// methods to serialize and deserialize a Visitor.
+// Note that any agents with a key pair that matches
+// Key will be serialized with empty keys.
+type AuthInfo struct {
+	Key    *bakery.KeyPair `json:"key,omitempty" yaml:"key,omitempty"`
+	Agents []Agent         `json:"agents" yaml:"agents"`
+}
+
+// Agent represents an agent that can be used for agent authentication.
+type Agent struct {
+	// URL holds the URL associated with the agent.
+	URL string `json:"url" yaml:"url"`
+	// Username holds the username to use for the agent.
+	Username string `json:"username" yaml:"username"`
+}
 
 // SetUpAuth sets up agent authentication on the given client,
 func SetUpAuth(client *httpbakery.Client, authInfo *AuthInfo) error {
@@ -41,10 +60,10 @@ func SetUpAuth(client *httpbakery.Client, authInfo *AuthInfo) error {
 	return nil
 }
 
-// interactionParms holds the information expected in
+// InteractionParams holds the information expected in
 // the agent interaction entry in an interaction-required
 // error.
-type interactionParams struct {
+type InteractionParams struct {
 	// Macaroon holds the discharge macaroon
 	// with with a self-addressed
 	// third party caveat that can be discharged to
@@ -62,7 +81,7 @@ func (i interactor) Kind() string {
 }
 
 func (i interactor) Interact(ctx context.Context, client *httpbakery.Client, location string, interactionRequiredErr *httpbakery.Error) (*bakery.Macaroon, error) {
-	var p interactionParams
+	var p InteractionParams
 	err := interactionRequiredErr.InteractionMethod("agent", &p)
 	if err != nil {
 		return nil, errgo.Mask(err)
@@ -79,6 +98,8 @@ type LegacyAgentResponse struct {
 }
 
 func (i interactor) LegacyInteract(ctx context.Context, client *httpbakery.Client, visitURL *url.URL) error {
+	log.Printf("interactor.LegacyInteract, visitURL %q; client.Key: %v {", visitURL, client.Key)
+	defer log.Printf("}")
 	c := &httprequest.Client{
 		Doer: client,
 	}
