@@ -1,0 +1,13 @@
+{
+	"comment": "",
+	"ignore": "",
+	"package": [
+		{
+			"checksumSHA1": "4C4kPMm4oiow1Tay48Epspz8P0A=",
+			"path": "github.com/juju/httprequest",
+			"revision": "97888e5c00b07a163549c16d7c1f549d14704571",
+			"revisionTime": "2017-08-21T12:10:43Z"
+		}
+	],
+	"rootPath": "gopkg.in/macaroon-bakery.v2-unstable"
+}
